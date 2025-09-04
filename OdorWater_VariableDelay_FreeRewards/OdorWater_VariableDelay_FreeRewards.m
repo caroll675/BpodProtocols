@@ -13,6 +13,7 @@ function OdorWater_VariableProbability_FreeRewards
 %   trials
 % M. Campbell 1/3/2023: Changed to just deliver Odors followed by Water
 % M. Campbell 7/17/2024: Added unpredicted water trials
+% C. Chen 9/4/2025: Changed to OdorWater_VariableDelay
 
 global BpodSystem
 
