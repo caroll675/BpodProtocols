@@ -1,4 +1,4 @@
-function OdorWater_VariableProbability_FreeRewards
+function OdorWater_VariableDelay_FreeRewards
 
 % M. Campbell 8/2/2021: Protocol to deliver odors followed by laser pulses.
 % M. Campbell 12/1/2021: Edited OdorLaser to create OdorLaserWater task.
@@ -16,6 +16,7 @@ function OdorWater_VariableProbability_FreeRewards
 % C. Chen 9/4/2025: Changed to OdorWater_VariableDelay
 
 global BpodSystem
+
 
 airON = 0;
 while ~airON
@@ -63,7 +64,7 @@ end
 S.Experimenter = 'Carol';
 S.Mouse = mouse;
 S.TrialStartSignal = 0.25; % seconds - LED as a trial start cue 
-S.PreOdorDelayDuration = 1.25; % seconds - pre odor period after LED before odor presentation
+S.OdorDelay = 1.25; % seconds - pre odor period after LED before odor presentation
 S.OdorDuration = 0.5; % seconds
 
 S.RewardDelay = [0.75 1.5 3 6]; % one per odor
@@ -114,17 +115,17 @@ end
 
 %% Pokes plot
 state_colors = struct( ...
-    'TrialStartSignal',[.9,.9,.9],...
-    'PreOdorDelay',[0.5 0.5 0.5],...
-    'Reward',[0 1 0],...
-    'CS1', [0 1 1],...
-    'CS2', [0 0 1],...
-    'CS3', [1 0 1],...
-    'CS4', [1 1 0],...
-    'RewardDelay', [.6 .6 .6],...
-    'ITI', [.9,.9,.9]);
-PokesPlotLicksSlow('init', state_colors, []);
+    'TrialStartSignal', [39 71 83]/255, ...  % black
+    'OdorDelay',        [0.8 0.8 0.8], ...  % gray
+    'CS1',              [230 109 80]/255, ...  % red
+    'CS2',              [231 198 107]/255, ...  % yellow
+    'CS3',              [138 176 124]/255, ...  % tender green
+    'CS4',              [41 157 143]/255, ...  % teal
+    'RewardDelay',      [0.85 0.85 0.85], ...  % gray
+    'Reward',           [41 114 112]/255, ...  % dark green
+    'ITI',              [0.92 0.92 0.92]);     % gray
 
+OdorWaterTrialVisualizer('init', state_colors);
 
 %% Set odors for each trial type in each mouse
 % S.OdorValvesOrder is the order of odors for this mouse, 
@@ -159,41 +160,41 @@ for currentTrial = 1:NumTrials
     
     % Display trial type
     if TrialType==0
-        fprintf('\tTrial %d:\tTrialType %d\tFree\tTotalReward=%d ITI=%0.1fs\n',...
+        % TimeElapsed = RewardValveTime + ITIDuration;
+        fprintf('\tTrial %d: TrialType=%d Free TotalReward=%d ITI=%0.1fs\n',...
             currentTrial,TrialType,AccumulatedReward,ITIDuration);
     else
-        fprintf('\tTrial %d:\tTrialType %d\tOdor%d\tTotalReward=%d ITI=%0.1fs\n',...
+        % TimeElapsed = S.TrialStartSignal + S.OdorDelay + S.OdorDuration + S.RewardDelay(TrialType) + RewardValveTime + ITIDuration;
+        fprintf('\tTrial %d: TrialType=%d Odor=%d TotalReward=%d ITI=%0.1fs\n',...
             currentTrial,TrialType,S.OdorValvesOrder(TrialType),AccumulatedReward,ITIDuration);
     end
     
     % Create state matrix
     sma = NewStateMatrix();
-    % free reward trial (reward -> ITI)
-    if TrialType==0
+    if TrialType==0 % (reward -> ITI)
         sma = AddState(sma, 'Name', 'Reward',...
             'Timer', RewardValveTime,...
             'StateChangeConditions', {'Tup', 'ITI'},...
             'OutputActions', {'ValveState',1, ... % opens the blank valve, closes the odor valve
-            'BNC1', 1, ... % sync pulse 
-            'BNC2', 0 ... % free reward trial - no LED
-            }); 
-    % odor trial (LED -> wait -> odor -> delay -> reward -> ITI)
-    else 
+            'BNC1', 1, 'BNC2', 0});
+    else % (LED -> odor delay -> odor -> reward delay -> reward -> ITI)
         sma = AddState(sma, 'Name', 'TrialStartSignal',...
             'Timer', S.TrialStartSignal,...
-            'StateChangeConditions', {'Tup', PreOdorDelay},...
+            'StateChangeConditions', {'Tup', 'OdorDelay'},...
             'OutputActions', {'BNC1', 1, ... & sync pulse
             'BNC2', 1 ... % odor trial - LED
             });
-        sma = AddState(sma, 'Name', 'PreOdorDelay',...
-            'Timer', S.PreOdorDelayDuration,...
+        sma = AddState(sma, 'Name', 'OdorDelay',...
+            'Timer', S.OdorDelay,...
             'StateChangeConditions', {'Tup', CS_state},...
                 'OutputActions', {'BNC1', 0, 'BNC2', 0}); 
-        sma = AddState(sma, 'Name', CS_state,...
-            'Timer', S.OdorDuration,...
-            'StateChangeConditions', {'Tup', 'RewardDelay'},...
-            'OutputActions', {'ValveModule1', ValveMessage,... % closes the blank valve, opens the odor valve
-                'BNC1', 0, 'BNC2', 0}); 
+        for tt = 1:S.NumOdors % for plotting purpose?
+            sma = AddState(sma, 'Name', sprintf('CS%d',tt),...
+                'Timer', S.OdorDuration,...
+                'StateChangeConditions', {'Tup', 'RewardDelay'},...
+                'OutputActions', {'ValveModule1', ValveMessage,... % closes the blank valve, opens the odor valve
+                    'BNC1', 0, 'BNC2', 0}); 
+        end 
         sma = AddState(sma, 'Name', 'RewardDelay',...
             'Timer', S.RewardDelay(TrialType),...
             'StateChangeConditions', {'Tup', 'Reward'},...
@@ -203,7 +204,7 @@ for currentTrial = 1:NumTrials
             'Timer', RewardValveTime,...
             'StateChangeConditions', {'Tup', 'ITI'},...
             'OutputActions', {'ValveState',1,'BNC1', 0, 'BNC2', 0});
-        
+    end  
     sma = AddState(sma, 'Name', 'ITI',...
         'Timer', ITIDuration,...
         'StateChangeConditions', {'Tup', 'exit'},...
@@ -229,19 +230,19 @@ for currentTrial = 1:NumTrials
         SaveBpodSessionData;
         
         % Update online plots
-        PokesPlotLicksSlow('update');
+        OdorWaterTrialVisualizer('update', state_colors);
     end
 
     % Handle pauses and exit if the user ended the session
     HandlePauseCondition;
     if BpodSystem.Status.BeingUsed == 0
+        fprintf('Protocol stopped by user at trial %d\n', currentTrial);
         ModuleWrite('ValveModule1', ['B' 0]); % make sure the odor valves are closed
         return
     end
-    
 end
 toc;
 
-fprintf('\nProtocol finished\n')
+fprintf('\nProtocol finished\n');
 
 end
