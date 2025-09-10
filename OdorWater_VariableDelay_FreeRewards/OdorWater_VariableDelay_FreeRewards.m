@@ -160,12 +160,10 @@ for currentTrial = 1:NumTrials
     
     % Display trial type
     if TrialType==0
-        % TimeElapsed = RewardValveTime + ITIDuration;
-        fprintf('\tTrial %d: TrialType=%d Free TotalReward=%d ITI=%0.1fs\n',...
+        fprintf('\tTrial %d: TrialType=%d\tFree\tTotalReward=%d ITI=%0.1fs\n',...
             currentTrial,TrialType,AccumulatedReward,ITIDuration);
     else
-        % TimeElapsed = S.TrialStartSignal + S.OdorDelay + S.OdorDuration + S.RewardDelay(TrialType) + RewardValveTime + ITIDuration;
-        fprintf('\tTrial %d: TrialType=%d Odor=%d TotalReward=%d ITI=%0.1fs\n',...
+        fprintf('\tTrial %d: TrialType=%d\tOdor%d\tTotalReward=%d ITI=%0.1fs\n',...
             currentTrial,TrialType,S.OdorValvesOrder(TrialType),AccumulatedReward,ITIDuration);
     end
     
