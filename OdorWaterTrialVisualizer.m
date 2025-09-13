@@ -11,10 +11,10 @@ action = varargin{1};
 state_colors = varargin{2};
 switch action
 
-    %% init    
+    %% init     
     case 'init' 
 
-        % Initialize handles
+        % Initialize handles 
         BpodSystem.GUIHandles.OdorWaterPlot.LicksHandle = [];
         
         % Create figure
