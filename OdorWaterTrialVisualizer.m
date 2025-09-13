@@ -42,14 +42,9 @@ switch action
         BpodSystem.GUIHandles.OdorWaterPlot.TrialTypeMenu = uicontrol('Style', 'popupmenu','Value',1, 'String', {'All', 'Free Reward', 'Odor Trials'}, 'Position', [305 35 80 20], 'FontWeight', 'normal', 'FontSize', 10, 'BackgroundColor','white', 'FontName', 'Arial','Callback', {@OdorWaterTrialVisualizer, 'trial_filter'});
         
         % Axis for plot
-        BpodSystem.GUIHandles.OdorWaterPlot.PlotAxis = axes('Position', [0.1 0.38 0.8 0.54],'Color', 0.3*[1 1 1]);
+        BpodSystem.GUIHandles.OdorWaterPlot.PokesPlotAxis = axes('Position', [0.1 0.38 0.8 0.54],'Color', 0.3*[1 1 1]);
         xlabel('Time (s)');
         ylabel('Trial Number');
-        
-        % Set initial axis limits
-        set(BpodSystem.GUIHandles.OdorWaterPlot.PlotAxis, 'XLim', [-2 25]);
-        set(BpodSystem.GUIHandles.OdorWaterPlot.PlotAxis, 'YLim', [0 15]);
-      
 
         % Initialize state handles
         fnames = fieldnames(state_colors);
@@ -60,6 +55,12 @@ switch action
                 hold on;
             end
         end
+        
+        % Set initial axis limits for the plot
+        set(BpodSystem.GUIHandles.OdorWaterPlot.PokesPlotAxis, 'XLim', ...
+            [str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeTop,'String')), ...
+            str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeBottom,'String'))]);
+        set(BpodSystem.GUIHandles.OdorWaterPlot.PokesPlotAxis,'YLim', [0 str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.Lastn, 'String'))]);
         
         % Color legend axis
         BpodSystem.GUIHandles.OdorWaterPlot.ColorAxis = axes('Position', [0.15 0.29 0.7 0.03]);
@@ -72,7 +73,7 @@ switch action
             else
                 legend = fnames{i}(1:12);
             end
-            hold on; 
+            hold on;
             t = text(i-0.5, -0.5, legend);
             set(t, 'Interpreter', 'none', 'HorizontalAlignment', 'right', 'VerticalAlignment', 'middle', 'Rotation', 90);
             set(gca, 'Visible', 'off');
@@ -92,12 +93,12 @@ switch action
         end
 
         figure(BpodSystem.ProtocolFigures.OdorWaterPlot);
-        axes(BpodSystem.GUIHandles.OdorWaterPlot.PlotAxis);
+        axes(BpodSystem.GUIHandles.OdorWaterPlot.PokesPlotAxis);
     
 
         % Check if GUI handles exist
         if ~isfield(BpodSystem.GUIHandles, 'OdorWaterPlot') || ...
-           ~isfield(BpodSystem.GUIHandles.OdorWaterPlot, 'PlotAxis')
+           ~isfield(BpodSystem.GUIHandles.OdorWaterPlot, 'PokesPlotAxis')
             fprintf('OdorWaterTrialVisualizer: GUI handles not found. Call init first.\n');
             return;
         end
@@ -108,11 +109,7 @@ switch action
         end
         
         current_trial = BpodSystem.Data.nTrials;
-        if current_trial == 1
-            return;
-        end
         last_n = str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.Lastn,'String'));
-        last_n = min(last_n, current_trial); % Dont exceed available trials
 
         % Get trial type filter
         trial_filter = get(BpodSystem.GUIHandles.OdorWaterPlot.TrialTypeMenu, 'Value');
@@ -126,12 +123,13 @@ switch action
         fnames = fieldnames(BpodSystem.GUIHandles.OdorWaterPlot.StateColors);
         for j = 1:last_n
             for i = 1:length(fnames)
-                set(BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(j).(fnames{i}), 'Visible', 'off');
+                if isfield(BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(j), fnames{i})
+                    set(BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(j).(fnames{i}), 'Visible', 'off');
+                end
             end
         end
         
         licks = cell(last_n, 1); 
-        plot_row = 0;
         
         for j = 1:last_n % trials       
             trial_toplot = current_trial - j + 1;
@@ -151,8 +149,6 @@ switch action
                     continue;
                 end
                 
-                plot_row = plot_row + 1;
-                
                 % Get available states for this trial
                 if isfield(BpodSystem.Data.RawEvents.Trial{trial_toplot}, 'States')
                     available_states = fieldnames(BpodSystem.Data.RawEvents.Trial{trial_toplot}.States);
@@ -166,7 +162,12 @@ switch action
                 
                 % Check if alignment state exists in this trial
                 if ismember(thisStateName, available_states)
-                    aligning_time = BpodSystem.Data.RawEvents.Trial{trial_toplot}.States.(thisStateName)(1);
+                    % use the end point of foreperiod to align or use the start point of all other states to align
+                    if strcmp(thisStateName,'Foreperiod') 
+                        aligning_time = BpodSystem.Data.RawEvents.Trial{trial_toplot}.States.(thisStateName)(2);
+                    else
+                        aligning_time = BpodSystem.Data.RawEvents.Trial{trial_toplot}.States.(thisStateName)(1);
+                    end
                 else
                     % If alignment state doesnt exist, align on first available state
                     if ~isempty(available_states)
@@ -184,10 +185,23 @@ switch action
                     if isfield(BpodSystem.GUIHandles.OdorWaterPlot.StateColors, state_name)
                         t = BpodSystem.Data.RawEvents.Trial{trial_toplot}.States.(state_name) - aligning_time;
                         x_vertices = [t(1) t(2) t(2) t(1)]';
-                        y_vertices = [repmat(plot_row-1,1,2)+0.1 repmat(plot_row,1,2)-0.1]';
-
+                        y_vertices = [repmat(last_n-j,1,2)+0.1 repmat(last_n-j+1,1,2)-0.1]';
+                        
+                        % Ensure state handle exists and is properly initialized
+                        if size(BpodSystem.GUIHandles.OdorWaterPlot.StateHandle,2) < last_n
+                            BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(last_n).(state_name) = fill([0 0 0 0],[0 0 0 0],BpodSystem.GUIHandles.OdorWaterPlot.StateColors.(state_name),'EdgeColor','none');
+                        end
+                        
+                        if ~isfield(BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(last_n-j+1), state_name)
+                            BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(last_n-j+1).(state_name) = fill([0 0 0 0],[0 0 0 0],BpodSystem.GUIHandles.OdorWaterPlot.StateColors.(state_name),'EdgeColor','none');
+                        end
+                        
+                        if isempty(BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(last_n-j+1).(state_name))
+                            BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(last_n-j+1).(state_name) = fill([0 0 0 0],[0 0 0 0],BpodSystem.GUIHandles.OdorWaterPlot.StateColors.(state_name),'EdgeColor','none');
+                        end
+                        
                         % Update state handle
-                        set(BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(plot_row).(state_name),...
+                        set(BpodSystem.GUIHandles.OdorWaterPlot.StateHandle(last_n-j+1).(state_name),...
                             'Vertices', [x_vertices y_vertices],...
                             'Visible', 'on');
                     end
@@ -195,27 +209,26 @@ switch action
                 
                 % Plot licks if they exist
                 if isfield(BpodSystem.Data.RawEvents.Trial{trial_toplot}.Events, 'Port1In')
-                    licks{plot_row} = BpodSystem.Data.RawEvents.Trial{trial_toplot}.Events.Port1In - aligning_time;
+                    licks{last_n-j+1} = BpodSystem.Data.RawEvents.Trial{trial_toplot}.Events.Port1In - aligning_time;
                 else
-                    licks{plot_row} = [];
+                    licks{last_n-j+1} = [];
                 end
             end
         end
 
         % Plot lick raster
-        if plot_row > 0
-            [~, ~, BpodSystem.GUIHandles.OdorWaterPlot.LicksHandle] = ...
-                plotSpikeRaster(licks(1:plot_row), 'PlotType', 'vertline', ... 
-                'XLimForCell', [str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeTop,'String')), ...
-                str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeBottom,'String'))], ...
-                'VertSpikePosition', -.4, 'VertSpikeHeight', .6, 'TimePerBin', .01, 'SpikeDuration', .01);
-        end
+        [~, ~, BpodSystem.GUIHandles.OdorWaterPlot.LicksHandle] = ...
+            plotSpikeRaster(licks, 'PlotType', 'vertline', ... 
+            'XLimForCell', [str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeTop,'String')), ...
+            str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeBottom,'String'))], ...
+            'VertSpikePosition', -.4, 'VertSpikeHeight', .6, 'TimePerBin', .01, 'SpikeDuration', .01);
         
         % Set axis limits
-        set(BpodSystem.GUIHandles.OdorWaterPlot.PlotAxis, 'XLim', ...
+        set(BpodSystem.GUIHandles.OdorWaterPlot.PokesPlotAxis, 'XLim', ...
             [str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeTop,'String')), ...
-             str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeBottom,'String'))]);
-        
+            str2double(get(BpodSystem.GUIHandles.OdorWaterPlot.LeftEdgeBottom,'String'))]);
+        set(BpodSystem.GUIHandles.OdorWaterPlot.PokesPlotAxis,'YLim', [0 last_n]);
+
 
     %% alignon callback
     case 'alignon'
