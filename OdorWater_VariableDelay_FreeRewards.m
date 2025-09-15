@@ -137,6 +137,15 @@ for i = 1:S.NumOdors
 end
 LoadSerialMessages('ValveModule1', ValveMessages);  % Set serial messages for valve module. Valve 1 is the default that is normally on
 
+%% Set up WavePlayer (Analog Output Module for controlling LED)
+W = BpodWavePlayer(COM_Ports.COM_Port{strcmp(COM_Ports.Module,'BpodWavePlayer')}); % Make sure the COM port is correct
+SR = 10000; % Sampling rate for analog output
+W.SamplingRate = SR;
+W.OutputRange = '0V:5V'; 
+LED_waveform = [ones(1, SR*S.TrialStartSignal) * 5, zeros(1, SR*0.01)]; % 5V for TrialStartSignal duration, then 0V briefly
+W.addWaveform(3, LED_waveform); % Add waveform to channel 3, index 1
+WavePlayerMessages = {['P' 3 1]}; % Serial message to play waveform 1 from channel 3
+LoadSerialMessages('WavePlayer3', WavePlayerMessages);
 
 %% Odor trials
 tic
@@ -180,11 +189,11 @@ for currentTrial = 1:NumTrials
         sma = AddState(sma, 'Name', 'TrialStartSignal',...
             'Timer', S.TrialStartSignal,...
             'StateChangeConditions', {'Tup', 'OdorDelay'},...
-            'OutputActions', {'AnalogOutput1', 5, 'BNC1', 1}); % turn on LED
+            'OutputActions', {'WavePlayer3', 1, 'BNC1', 1}); % turn on LED, channel 3, first waveform
         sma = AddState(sma, 'Name', 'OdorDelay',...
             'Timer', S.OdorDelay,...
             'StateChangeConditions', {'Tup', CS_state},...
-                'OutputActions', {'AnalogOutput1', 0, 'BNC1', 0}); 
+                'OutputActions', {'BNC1', 0}); 
         for tt = 1:S.NumOdors % plotting purpose
             sma = AddState(sma, 'Name', sprintf('CS%d',tt),...
                 'Timer', S.OdorDuration,...
