@@ -1,6 +1,9 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+from pathlib import Path
+import sync_data
 
 def select_roi(video_path):
     """
@@ -35,7 +38,7 @@ def select_roi(video_path):
     else:
         return None
 
-def detect_licks(video_path, roi, threshold=30, min_movement_area=150, cooldown_frames=4, show_video_with_licks=False, playback_speed=1.0, sync_pulse_periods=None):
+def detect_licks(video_path, roi, threshold=30, min_movement_percent=20, cooldown_frames=2, show_video_with_licks=False, playback_speed=0.5, synced_gpio_file=None):
     """
     Detects mouse licks in a video using frame differencing within a specified ROI.
     Optionally displays the video with lick indicators and controls playback speed.
@@ -44,28 +47,34 @@ def detect_licks(video_path, roi, threshold=30, min_movement_area=150, cooldown_
         video_path (str): The path to the video file.
         roi (tuple): (x, y, w, h) of the Region of Interest.
         threshold (int): Pixel intensity difference threshold for movement detection.
-        min_movement_area (int): Minimum area of movement (pixels) to be considered a lick.
+        min_movement_percent (float): Minimum percentage (0-100) of changed pixels within ROI to count as a lick.
         cooldown_frames (int): Number of frames to ignore after detecting a lick to prevent multiple counts.
         show_video_with_licks (bool): If True, displays the video with visual lick indicators.
         playback_speed (float): Controls the video playback speed (1.0 for normal, <1.0 for slower, >1.0 for faster).
         sync_pulse_periods (list): A list of [start_time, end_time] tuples for active sync pulses.
 
     Returns:
-        tuple: (lick_timestamps, lick_rate_bpm, video_duration_seconds)
+        list: lick_timestamps
     """
+    syncpulse = synced_gpio_file['syncpulse']
+    state = synced_gpio_file['state']
+    trialtype = synced_gpio_file['trialtype']
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"Error: Could not open video file {video_path}")
-        return None, None, None
+        return None, None, None, None
 
     x, y, w, h = roi
+    roi_area = w * h if w > 0 and h > 0 else 0
+    # Translate percentage to a pixel count threshold based on ROI size
+    min_changed_pixels = (roi_area * (min_movement_percent / 100.0)) if roi_area > 0 else float('inf')
     
     # Read the first frame
     ret, prev_frame = cap.read()
     if not ret:
         print("Error: Could not read the first frame.")
         cap.release()
-        return None, None, None
+        return None, None, None, None
 
     prev_roi_gray = cv2.cvtColor(prev_frame[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
     prev_roi_blur = cv2.GaussianBlur(prev_roi_gray, (21, 21), 0)
@@ -81,6 +90,7 @@ def detect_licks(video_path, roi, threshold=30, min_movement_area=150, cooldown_
     wait_key_delay = 1 if fps == 0 else max(1, int(1000 / (fps * playback_speed)))
 
     frame_num = 1
+    index = 0
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -101,16 +111,19 @@ def detect_licks(video_path, roi, threshold=30, min_movement_area=150, cooldown_
         # Dilate the thresholded image to fill in small holes
         dilated = cv2.dilate(thresh, None, iterations=2)
         
-        # Find contours of moving objects
+        # Find contours (for visualization) and compute overall changed pixel count for detection
         contours, _ = cv2.findContours(dilated.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        movement_detected = False
+        # Use percentage of changed pixels across the ROI as detection criterion
+        changed_pixels = cv2.countNonZero(dilated)
+        movement_detected = changed_pixels > min_changed_pixels
+
+        # Track largest contour for optional visualization
         largest_contour_area = 0
         largest_contour = None
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > min_movement_area:
-                movement_detected = True
+        if contours:
+            for contour in contours:
+                area = cv2.contourArea(contour)
                 if area > largest_contour_area:
                     largest_contour_area = area
                     largest_contour = contour
@@ -139,18 +152,19 @@ def detect_licks(video_path, roi, threshold=30, min_movement_area=150, cooldown_
             cv2.putText(frame, f"Licks: {len(lick_timestamps)}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
             
             # Check and display sync pulse information
-            if sync_pulse_periods:
-                is_sync_active = False
-                for start_t, end_t in sync_pulse_periods:
-                    if start_t <= current_time < end_t:
-                        is_sync_active = True
-                        break
-                if is_sync_active:
-                    cv2.putText(frame, "Sync Pulse ON", (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA) # Yellow text
-
+            this_state = str(state[index])
+            this_sync = str(syncpulse[index])
+            this_trial_type = str(trialtype[index])
+            if this_trial_type != 'None':
+                cv2.putText(frame, 'Trial Type: ' + this_trial_type, (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
+            if this_sync != 'None':
+                cv2.putText(frame, this_sync, (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA) # Yellow text
+            if this_state != 'None':
+                cv2.putText(frame, this_state, (10, 190), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
             cv2.imshow("Lick Detection Video", frame)
             if cv2.waitKey(wait_key_delay) & 0xFF == ord('q'): # Press 'q' to quit video playback
                 break
+        index += 1
 
     cap.release()
     cv2.destroyAllWindows()
@@ -158,59 +172,8 @@ def detect_licks(video_path, roi, threshold=30, min_movement_area=150, cooldown_
     video_duration_seconds = total_frames / fps if fps > 0 else 0
     lick_rate_bpm = (len(lick_timestamps) / video_duration_seconds) * 60 if video_duration_seconds > 0 else 0
 
-    return lick_timestamps, lick_rate_bpm, video_duration_seconds
+    return lick_timestamps, lick_rate_bpm, video_duration_seconds, fps
 
-def parse_gpio_data(gpio_file_path):
-    """
-    Parses GPIO data from a CSV file to identify sync pulse periods.
-
-    Args:
-        gpio_file_path (str): Path to the GPIO CSV file.
-
-    Returns:
-        list: A list of [start_time, end_time] tuples (in seconds) for active sync pulses.
-    """
-    sync_pulse_periods = []
-    current_pulse_start = None
-    last_time_in_seconds = 0 # To handle potential end-of-file pulse
-
-    with open(gpio_file_path, 'r') as f:
-        for line in f:
-            parts = line.strip().split(',') # Assuming CSV format
-            if len(parts) >= 3:
-                gpio_val_str = parts[0]
-                time_str = parts[2]
-
-                try:
-                    gpio_val = int(gpio_val_str)
-                    
-                    # Parse MM:SS.ms timestamp
-                    min_sec_ms = time_str.split(':')
-                    if len(min_sec_ms) == 2:
-                        minutes = int(min_sec_ms[0])
-                        seconds_ms = float(min_sec_ms[1])
-                        current_time_in_seconds = minutes * 60 + seconds_ms
-                        last_time_in_seconds = current_time_in_seconds # Update last_time
-                    else:
-                        continue # Skip malformed timestamps
-
-                    # Check for active pulse (value > 0 indicates pulse ON)
-                    if gpio_val > 0: 
-                        if current_pulse_start is None:
-                            current_pulse_start = current_time_in_seconds
-                    else:
-                        if current_pulse_start is not None:
-                            # End of pulse, store the period
-                            sync_pulse_periods.append([current_pulse_start, current_time_in_seconds])
-                            current_pulse_start = None
-                except ValueError:
-                    continue # Skip lines with parsing errors
-
-    # If a pulse was active until the end of the file, use the last recorded timestamp as end time
-    if current_pulse_start is not None:
-        sync_pulse_periods.append([current_pulse_start, last_time_in_seconds])
-
-    return sync_pulse_periods
 
 def plot_licks(lick_timestamps, video_duration_seconds):
     """
@@ -230,45 +193,59 @@ def plot_licks(lick_timestamps, video_duration_seconds):
     plt.show()
 
 if __name__ == "__main__":
-    video_path = input("Enter the path to the mouse licking video: ")
+    protocol = 'OdorWater_VariableDelay_FreeRewards'
+    print('protocol: ' + protocol)
+    mouse_id = "CC" + input("MouseID: CC")
+    date = "2025" + input("Date (eg. 0917): 2025")
+
+    root_bpod_dir = Path(r"\\140.247.90.110\homes2\Carol\BpodData")
+    session_dir = root_bpod_dir / mouse_id / protocol / "Session Data"
+    pattern = f"{mouse_id}_{protocol}_{date}_*.mat"
+    # choose the latest match if multiple
+    matches = list(session_dir.glob(pattern))
+    bpod_data_path = max(matches, key=lambda p: p.stat().st_mtime) if matches else None
+    if bpod_data_path is None:
+        print("No session file found")
+
+    root_video_dir = Path(r"\\140.247.90.110\homes2\Carol\VideoData")
+    video_path = next(Path(root_video_dir).glob(f"{mouse_id}_{date}_*_cam1.avi"))
+    if not video_path:
+         print("No video found")
+
+    gpio_file_path = next(Path(root_video_dir).glob(f"{mouse_id}_{date}_*_gpio1.csv"))
+    
+    synced_gpio_file = sync_data.sync_bpod_video(gpio_file_path=gpio_file_path, bpod_data_path=bpod_data_path)
 
     selected_roi = select_roi(video_path)
 
     if selected_roi:
         print(f"Selected ROI: {selected_roi}")
         
-        show_video = input("Do you want to show video playback with lick detection? (y/n): ").lower()
+        show_video = input("Video playback with lick detection? (y/n): ").lower()
         show_video_with_licks = (show_video == 'y')
 
         playback_speed = 1.0
         if show_video_with_licks:
             try:
-                speed_input = float(input("Enter playback speed (e.g., 1.0 for normal, 0.5 for half, 2.0 for double): "))
+                speed_input = float(input("Enter playback speed:"))
                 if speed_input > 0:
                     playback_speed = speed_input
                 else:
-                    print("Playback speed must be positive. Using default (1.0).")
+                    print("Playback speed must be positive. Using default (0.5).")
             except ValueError:
-                print("Invalid input for playback speed. Using default (1.0).")
+                print("Invalid input for playback speed. Using default (0.5).")
 
-        gpio_file_path = input("Enter the path to the GPIO file (e.g., /path/to/sync_pulses.csv) or leave blank if not applicable: ")
-        sync_pulse_periods = []
-        if gpio_file_path:
-            sync_pulse_periods = parse_gpio_data(gpio_file_path)
-            if not sync_pulse_periods:
-                print("Warning: No sync pulse periods found in the provided GPIO file.")
 
         # Threshold is now a default value in detect_licks, not user-prompted
         # min_movement_area = 150, cooldown_frames = 4
-        lick_timestamps, lick_rate, video_duration = detect_licks(video_path, selected_roi, 
-                                                                show_video_with_licks=show_video_with_licks, 
-                                                                playback_speed=playback_speed, 
-                                                                sync_pulse_periods=sync_pulse_periods)
+        lick_timestamps, lick_rate, video_duration, fps = detect_licks(video_path, selected_roi, 
+                                                                  show_video_with_licks=show_video_with_licks, 
+                                                                  playback_speed=playback_speed, 
+                                                                  synced_gpio_file=synced_gpio_file)
         
         if lick_timestamps is not None:
-            print(f"Detected lick rate: {lick_rate:.2f} licks per minute")
-            print(f"Total licks: {len(lick_timestamps)}")
-            print(f"Lick timestamps (seconds): {lick_timestamps}")
             plot_licks(lick_timestamps, video_duration)
+            print(lick_timestamps)
+
     else:
         print("No ROI selected or an error occurred during ROI selection.")
