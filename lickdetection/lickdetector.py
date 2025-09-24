@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
 import sync_data
+from scipy.stats import sem # Import for Standard Error of the Mean
 
 def select_roi(video_path):
     """
@@ -80,6 +81,7 @@ def detect_licks(video_path, roi, threshold=30, min_movement_percent=20, cooldow
     prev_roi_blur = cv2.GaussianBlur(prev_roi_gray, (21, 21), 0)
 
     lick_timestamps = []
+    lick_frames = np.full(len(synced_gpio_file), 0, dtype=object)
     in_cooldown = 0
     
     # Get video properties
@@ -97,6 +99,7 @@ def detect_licks(video_path, roi, threshold=30, min_movement_percent=20, cooldow
             break
 
         current_time = (frame_num / fps) if fps > 0 else 0
+        current_frame = frame_num
         frame_num += 1
         current_roi = frame[y:y+h, x:x+w]
         current_roi_gray = cv2.cvtColor(current_roi, cv2.COLOR_BGR2GRAY)
@@ -130,6 +133,7 @@ def detect_licks(video_path, roi, threshold=30, min_movement_percent=20, cooldow
         
         if movement_detected and in_cooldown == 0:
             lick_timestamps.append(current_time)
+            lick_frames[index] = 1 
             in_cooldown = cooldown_frames
             if show_video_with_licks and largest_contour is not None:
                 # Draw bounding box around the largest moving object
@@ -170,9 +174,8 @@ def detect_licks(video_path, roi, threshold=30, min_movement_percent=20, cooldow
     cv2.destroyAllWindows()
 
     video_duration_seconds = total_frames / fps if fps > 0 else 0
-    lick_rate_bpm = (len(lick_timestamps) / video_duration_seconds) * 60 if video_duration_seconds > 0 else 0
-
-    return lick_timestamps, lick_rate_bpm, video_duration_seconds, fps
+   
+    return lick_timestamps, lick_frames, video_duration_seconds, fps
 
 
 def plot_licks(lick_timestamps, video_duration_seconds):
@@ -191,6 +194,16 @@ def plot_licks(lick_timestamps, video_duration_seconds):
     plt.xlim(0, video_duration_seconds)
     plt.grid(True, axis='x', linestyle='--')
     plt.show()
+
+def _rowwise_sem(df: pd.DataFrame) -> pd.Series:
+    # Count non-NaN per row
+    n = df.count(axis=1).astype(float)
+    # Sample std with ddof=1; where n<2, SEM is NaN
+    std = df.std(axis=1, ddof=1)
+    sem = std / np.sqrt(n)
+    sem[n < 2] = np.nan
+    return sem
+
 
 if __name__ == "__main__":
     protocol = 'OdorWater_VariableDelay_FreeRewards'
@@ -236,13 +249,61 @@ if __name__ == "__main__":
                 print("Invalid input for playback speed. Using default (0.5).")
 
 
-        # Threshold is now a default value in detect_licks, not user-prompted
-        # min_movement_area = 150, cooldown_frames = 4
-        lick_timestamps, lick_rate, video_duration, fps = detect_licks(video_path, selected_roi, 
+        lick_timestamps, lick_frames, video_duration, fps = detect_licks(video_path, selected_roi, 
                                                                   show_video_with_licks=show_video_with_licks, 
                                                                   playback_speed=playback_speed, 
                                                                   synced_gpio_file=synced_gpio_file)
+
+        # plot lick rate per second per trial
+        synced_gpio_file['lickframe'] = lick_frames
+        unique_trial_type = synced_gpio_file['trialtype'].unique()
         
+        all_lick_rates_per_trial_type = {} # Dictionary to store organized lick rates
+
+        for tt in unique_trial_type:
+            all_lick_rates_per_trial_type[tt] = {}
+            tt_df = synced_gpio_file[synced_gpio_file['trialtype'] == tt].copy() # .copy() to avoid SettingWithCopyWarning
+            unique_trial_start_time = tt_df['trialstarttime'].unique()
+            
+            for trial_idx, t_start in enumerate(unique_trial_start_time):
+                single_trial_df = tt_df[tt_df['trialstarttime']==t_start]
+                
+                lick_rates_per_second = []
+                # Iterate through the trial in 1-second (frames_per_second) chunks
+                for i in range(0, len(single_trial_df), fps):
+                    # Extract a 1-second chunk of lick_frames
+                    chunk = single_trial_df['lickframe'].iloc[i : i + fps]
+                    # Count licks (number of 1s) in this chunk
+                    licks_in_second = chunk.astype(int).sum()
+                    lick_rates_per_second.append(licks_in_second)
+                
+                all_lick_rates_per_trial_type[tt][trial_idx] = lick_rates_per_second
+        
+        # plot lick rate over time for each trial type 
+        # plot mean and sem to represent trials in each trial type
+        plt.figure()
+        for tt, trials_dict in all_lick_rates_per_trial_type.items():
+            df = pd.DataFrame(trials_dict)
+            df.index.name = "second"
+
+            mean_series = df.mean(axis=1, skipna=True) # calculate the mean of each row
+            sem_series  = _rowwise_sem(df)
+
+            # Time axis in seconds
+            t = mean_series.index.to_numpy()
+
+            plt.figure()
+            plt.plot(t, mean_series, label=f"{tt} mean")
+            plt.fill_between(t, mean_series - sem_series, mean_series + sem_series, alpha=0.2)
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Licks / s")
+        plt.title(f"Lick rate over time — trial type: {tt}")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+
         if lick_timestamps is not None:
             plot_licks(lick_timestamps, video_duration)
             print(lick_timestamps)

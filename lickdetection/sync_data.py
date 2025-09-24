@@ -54,7 +54,8 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
     fps = 30
     state = np.full(len(parse_gpio_data), 'None', dtype=object)
     trial_type_col = np.full(len(parse_gpio_data), 'None', dtype=object)
-    
+    trial_start_time_col = np.full(len(parse_gpio_data), 'None', dtype=object)
+
     to_frames = lambda sec: int(round(sec * fps))
 
     def paint(start, seconds, label):
@@ -73,6 +74,7 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
         trial_duration_sec = TrialEndTimestamp[i] - TrialStartTimestamp[i]
         trial_end_frame = trial_start_frame + int(round(trial_duration_sec*fps))
         trial_type_col[trial_start_frame:trial_end_frame] = tt
+        trial_start_time_col[trial_start_frame:trial_end_frame] = TrialStartTimestamp[i]
 
         if tt == 0:
             s = paint(s,  RewardValveTime, 'Reward')  
@@ -89,5 +91,6 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
 
     parse_gpio_data['state'] = state
     parse_gpio_data['trialtype'] = trial_type_col
+    parse_gpio_data['trialstarttime'] = trial_start_time_col
     parse_gpio_data.to_csv('tmp.csv')
     return parse_gpio_data
