@@ -10,8 +10,8 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
     parse_gpio_data = pd.read_csv(gpio_file_path, header=None)
     parse_gpio_data.columns = ['pulse1', 'pulse2', 'timestamp']
     # load the sync pulse start and end in 24 hour clock system
-    sync_pulse_start_frame = parse_gpio_data[(parse_gpio_data['pulse1'].diff() > 0)].index + 1
-    sync_pulse_end_frame = parse_gpio_data[(parse_gpio_data['pulse1'].diff() < 0)].index
+    sync_pulse_start_frame = parse_gpio_data[(parse_gpio_data['pulse1'].diff() > 0)].index
+    sync_pulse_end_frame = parse_gpio_data[(parse_gpio_data['pulse1'].diff() < 0)].index-1
     # one time I forgot to restart the video after I restarted the protocol, so I only need the last 110 sync pulse
     sync_pulse_start_frame = sync_pulse_start_frame[-110:]
     sync_pulse_end_frame = sync_pulse_end_frame[-110:]
@@ -36,11 +36,11 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
         TrialSettings = SessionData.TrialSettings[0]
         trialSettings_field_names = [attr for attr in dir(TrialSettings) if not attr.startswith('__')]
         # print(f"TrialSettings contains the following fields: {trialSettings_field_names}")
-        LED = TrialSettings.TrialStartSignal
-        OdorDelay = TrialSettings.OdorDelay
-        Odor = TrialSettings.OdorDuration
-        RewardDelay = TrialSettings.RewardDelay
-        RewardValveTime = 0.0883
+        LED = TrialSettings.TrialStartSignal # LED duration before odor presentation
+        OdorDelay = TrialSettings.OdorDelay # odor delay after LED
+        Odor = TrialSettings.OdorDuration # odor duration
+        RewardDelay = TrialSettings.RewardDelay # reward delay after odor
+        RewardValveTime = 0.0883 # reward valve time
 
     except AttributeError as e:
         print(f"Error accessing field: {e}. Check the exact structure of your .mat file.")
@@ -49,44 +49,47 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
     TrialTypes = SessionData.TrialTypes
     TrialStartTimestamp = SessionData.TrialStartTimestamp # in sec
     TrialEndTimestamp = SessionData.TrialEndTimestamp
-    TrialDuration = TrialEndTimestamp - TrialStartTimestamp
 
     fps = 30
-    state = np.full(len(parse_gpio_data), 'None', dtype=object)
-    trial_type_col = np.full(len(parse_gpio_data), 'None', dtype=object)
-    trial_start_time_col = np.full(len(parse_gpio_data), 'None', dtype=object)
+    state = np.full(len(parse_gpio_data), 'None', dtype=object) # LED, OdorDelay, Odor, RewardDelay, Reward, ITI
+    trial_type_col = np.full(len(parse_gpio_data), 'None', dtype=object) # 0 = free reward, 1 = Odor1, 2 = Odor2, etc
+    trial_start_time_col = np.full(len(parse_gpio_data), 'None', dtype=object) # trial start time in sec
 
-    to_frames = lambda sec: int(round(sec * fps))
+    def to_frames_round(sec, round):
+        if round == 'down':
+            return int(np.floor(sec * fps))
+        elif round == 'up':
+            return int(np.ceil(sec * fps))
 
-    def paint(start, seconds, label):
+    def paint(start, seconds, label, round='down'):
         s = int(start)
-        e = min(s + to_frames(seconds), len(state))
+        e = min(s + to_frames_round(seconds, round), len(state))
         if e > s:
             state[s:e] = label
         return e  # next start
 
-
+    # bpod might take some time to transition to the next trial so there are some empty frames between trials?
     for i, start_frame in enumerate(sync_pulse_start_frame):
         tt = TrialTypes[i]
         s = int(start_frame)
 
-        trial_start_frame = s
+        trial_start_frame = s # syncpulse start frame is also the trial start frame
         trial_duration_sec = TrialEndTimestamp[i] - TrialStartTimestamp[i]
-        trial_end_frame = trial_start_frame + int(round(trial_duration_sec*fps))
+        trial_end_frame = trial_start_frame + int(round(trial_duration_sec*fps)) 
         trial_type_col[trial_start_frame:trial_end_frame] = tt
         trial_start_time_col[trial_start_frame:trial_end_frame] = TrialStartTimestamp[i]
 
         if tt == 0:
-            s = paint(s,  RewardValveTime, 'Reward')  
-            s = paint(s, trial_duration_sec - RewardValveTime, 'ITI')
+            s = paint(s,  RewardValveTime, 'Reward', 'up')  
+            s = paint(s, trial_duration_sec - RewardValveTime, 'ITI', 'down')
         else:
-            s = paint(s, LED, 'LED')
-            s = paint(s, OdorDelay, 'OdorDelay')
-            s = paint(s, Odor, 'Odor')
-            s = paint(s, RewardDelay[TrialTypes[i]-1], 'RewardDelay')
-            s = paint(s, RewardValveTime, 'Reward')
+            s = paint(s, LED, 'LED', 'up') # supposed to be 7.5 frames, round up to be 8 frames
+            s = paint(s, OdorDelay, 'OdorDelay', 'down') # supposed to be 37.5 frames, round down to be 37 frames
+            s = paint(s, Odor, 'Odor', 'down') # supposed to be 15 frames
+            s = paint(s, RewardDelay[TrialTypes[i]-1], 'RewardDelay', 'down') # 0.75sec = 22.5 frames (round down to 22), 1.5sec = 45 frames, 3sec = 90 frames, 6sec = 180 frames
+            s = paint(s, RewardValveTime, 'Reward', 'up') # supposed to be 2.649 frames (round up to 3)
             tasktime = LED + OdorDelay + RewardDelay[TrialTypes[i]-1] + RewardValveTime
-            s = paint(s, trial_duration_sec - tasktime , 'ITI')
+            s = paint(s, trial_duration_sec - tasktime , 'ITI', 'down')
 
 
     parse_gpio_data['state'] = state

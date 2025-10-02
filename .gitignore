@@ -1,4 +1,5 @@
 .vscode/
+__pycache__/
 *.avi
 *.csv
 *.pkl
