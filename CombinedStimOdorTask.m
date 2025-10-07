@@ -52,14 +52,14 @@ OdorChunkSize = 22; % trials; chunk size in which to balance trial types
 S.NumOdorTrials = OdorChunkSize*5; % 110 trials in total, 10 free reward trials, 100 odor trials
 
 S.RewardDelay = [0.75 1.5 3 6]; % one per odor
-S.FracTrials_Odor = [5/ChunkSize 5/ChunkSize 5/ChunkSize 5/ChunkSize]; % fraction trials per odor (changed ChunkSize to 22)
+S.FracTrials_Odor = [5/OdorChunkSize 5/OdorChunkSize 5/OdorChunkSize 5/OdorChunkSize]; % fraction trials per odor (changed ChunkSize to 22)
 S.FracTrials_Free = 1-sum(S.FracTrials_Odor); % fraction free reward trials = 2/22
 assert(S.NumOdors == numel(S.RewardDelay),'RewardDelay must have same number of elements as there are odors'); % assert one reward delay per odor
 S.RewardAmount = 4; % in uL; same for all odors
 
-S.ITIMean_Odor = 18.5;
-S.ITIMin_Odor = 17;
-S.ITIMax_Odor = 20;
+S.ITIMean_odor = 18.5;
+S.ITIMin_odor = 17;
+S.ITIMax_odor = 20;
 
 %% Parameters from StimPatterns_FreeWater_7Pattern.m
 S.NumPatterns = 3;
@@ -133,10 +133,7 @@ W.loadWaveform(4,waveform_optotag);
 %% LED 
 LED_waveform = [ones(1, SR*S.TrialStartSignal) * 5, zeros(1, SR*0.01)]; % 5V for TrialStartSignal duration, then 0V briefly
 W.loadWaveform(5, LED_waveform); % Add waveform to channel 3, index 1
-channel = 3;
-% WavePlayerMessages = {['P' 2^(channel-1) 0]}; % Serial message to play first waveform from channel 3
-% LoadSerialMessages('WavePlayer1', WavePlayerMessages);
-
+channel = 4;
 
 % load waveforms to WavePlayer:
 WavePlayerMessages = {};
@@ -152,7 +149,6 @@ LoadSerialMessages('WavePlayer1', WavePlayerMessages);
 % save waveforms to bpod output structure S (task parameters):
 S.stimWaveforms = {};
 S.stimWaveforms = {waveform_rampUp,waveform_rampDown,waveform_3secSquare_20Hz};
-
 
 
 %% Stim trial types
@@ -195,10 +191,10 @@ for chunkIdx = 1:NumChunks_Odor
     
     max_consec = Inf;
     while tt_this(1)==0 || max_consec > 3
-        shuf_idx = randperm(ChunkSize_Odor);
+        shuf_idx = randperm(OdorChunkSize);
         tt_this = tt_this(shuf_idx);
         delay_this = delay_this(shuf_idx);
-        max_consec = max(diff([0 find(diff(tt_this)~=0) ChunkSize_Odor]));
+        max_consec = max(diff([0 find(diff(tt_this)~=0) OdorChunkSize]));
     end
 
     
@@ -232,19 +228,18 @@ for i = 1:S.NumOdors
 end
 LoadSerialMessages('ValveModule1', ValveMessages);  % Set serial messages for valve module. Valve 1 is the default that is normally on
 
-%% Turn on red lamps
-sma = NewStateMatrix();
-sma = AddState(sma, 'Name', 'TurnOnLamps',...
-            'Timer', 0.1,...
-            'StateChangeConditions', {'Tup', 'exit'},...
-            'OutputActions', {'BNC2',1});
-SendStateMatrix(sma);
-% Handle pauses and exit if the user ended the session
-HandlePauseCondition;
-if BpodSystem.Status.BeingUsed == 0
-    fprintf('Protocol stopped by user at trial %d\n', currentTrial);
-    ModuleWrite('ValveModule1', ['B' 0]); % make sure the odor valves are closed
-    return
+%% Start Protocol
+RedLampOn = 0;
+while ~RedLampOn
+    answer = questdlg('Is the Red Lamp ON?', ...
+	'Yes','No');
+    switch answer
+        case 'Yes'
+            RedLampOn = 1;
+        case 'No'
+            disp('Please turn on red lamp')
+            RedLampOn = 0;
+    end
 end
 
 total_trial_ctr = 0;
@@ -319,9 +314,9 @@ for currentTrial = 1:S.NumStimTrials1
     LaserMessage = TrialType;
     
     % Calculate ITI for this trial
-    ITIDuration = exprnd(S.ITIMean-S.ITIMin) + S.ITIMin;
-    if ITIDuration > S.ITIMax
-        ITIDuration = S.ITIMax;
+    ITIDuration = exprnd(S.ITIMean_stim-S.ITIMin_stim) + S.ITIMin_stim;
+    if ITIDuration > S.ITIMax_stim
+        ITIDuration = S.ITIMax_stim;
     end
     
     
@@ -381,18 +376,17 @@ toc;
 pause(10);
 
 %% Turn off red lamps
-sma = NewStateMatrix();
-sma = AddState(sma, 'Name', 'TurnOffLamps',...
-            'Timer', 0.1,...
-            'StateChangeConditions', {'Tup', 'exit'},...
-            'OutputActions', {'BNC2',0});
-SendStateMatrix(sma);
-% Handle pauses and exit if the user ended the session
-HandlePauseCondition;
-if BpodSystem.Status.BeingUsed == 0
-    fprintf('Protocol stopped by user at trial %d\n', currentTrial);
-    ModuleWrite('ValveModule1', ['B' 0]); % make sure the odor valves are closed
-    return
+RedLampOff = 0;
+while ~RedLampOff
+    answer = questdlg('Is the Red Lamp OFF?', ...
+	'Yes','No');
+    switch answer
+        case 'Yes'
+            RedLampOff = 1;
+        case 'No'
+            disp('Please turn off red lamp')
+            RedLampOff = 0;
+    end
 end
 
 pause(10);
@@ -415,7 +409,7 @@ for currentTrial = 1:S.NumOdorTrials
     ValveMessage = TrialType+1;
     
     % Calculate ITI for this trial
-    ITIDuration = (S.ITIMax_Odor - S.ITIMin_Odor) * rand() + S.ITIMin_Odor;
+    ITIDuration = (S.ITIMax_odor - S.ITIMin_odor) * rand() + S.ITIMin_odor;
     
     % Display trial type
     if TrialType==0
@@ -437,7 +431,7 @@ for currentTrial = 1:S.NumOdorTrials
         sma = AddState(sma, 'Name', 'TrialStartSignal',...
             'Timer', S.TrialStartSignal,...
             'StateChangeConditions', {'Tup', 'OdorDelay'},...
-            'OutputActions', {'WavePlayer1', S.NumTrials+2, 'BNC1', 1}); % turn on LED, BNC1 for sync pulse, BNC2 off
+            'OutputActions', {'WavePlayer1', S.NumTrials+2, 'BNC1', 1}); 
         sma = AddState(sma, 'Name', 'OdorDelay',...
             'Timer', S.OdorDelay,...
             'StateChangeConditions', {'Tup', CS_state},...
@@ -501,18 +495,17 @@ fprintf('\nOdor trials finished\n');
 pause(10);
 
 %% Turn on red lamps
-sma = NewStateMatrix();
-sma = AddState(sma, 'Name', 'TurnOnLamps',...
-            'Timer', 0.1,...
-            'StateChangeConditions', {'Tup', 'exit'},...
-            'OutputActions', {'BNC2',1});
-SendStateMatrix(sma);
-% Handle pauses and exit if the user ended the session
-HandlePauseCondition;
-if BpodSystem.Status.BeingUsed == 0
-    fprintf('Protocol stopped by user at trial %d\n', currentTrial);
-    ModuleWrite('ValveModule1', ['B' 0]); % make sure the odor valves are closed
-    return
+RedLampOn = 0;
+while ~RedLampOn
+    answer = questdlg('Is the Red Lamp ON?', ...
+	'Yes','No');
+    switch answer
+        case 'Yes'
+            RedLampOn = 1;
+        case 'No'
+            disp('Please turn on red lamp')
+            RedLampOn = 0;
+    end
 end
 
 pause(10);
@@ -533,9 +526,9 @@ for currentTrial = 1:S.NumStimTrials2
     LaserMessage = TrialType;
     
     % Calculate ITI for this trial
-    ITIDuration = exprnd(S.ITIMean-S.ITIMin) + S.ITIMin;
-    if ITIDuration > S.ITIMax
-        ITIDuration = S.ITIMax;
+    ITIDuration = exprnd(S.ITIMean_stim-S.ITIMin_stim) + S.ITIMin_stim;
+    if ITIDuration > S.ITIMax_stim
+        ITIDuration = S.ITIMax_stim;
     end
     
     
@@ -549,21 +542,21 @@ for currentTrial = 1:S.NumStimTrials2
     sma = AddState(sma, 'Name', 'Foreperiod',...
         'Timer', S.ForeperiodDuration,...
         'StateChangeConditions', {'Tup', Stim_state},...
-        'OutputActions', {'BNC1', 1}); % BNC1 for sync pulse, BNC2 for red lamp ON
+        'OutputActions', {'BNC1', 1}); 
     for tt = 1:S.NumPatterns
         sma = AddState(sma, 'Name', sprintf('Stim%d',tt),...
             'Timer', 2,... % Assuming 2 seconds for stim duration, adjust if necessary
             'StateChangeConditions', {'Tup', 'ITI'},...
-            'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0}); % BNC1 off, BNC2 for red lamp ON
+            'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0}); 
     end
     sma = AddState(sma, 'Name', 'ITI',...
         'Timer', ITIDuration,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'BNC1', 0}); % BNC1 off, BNC2 for red lamp ON
+        'OutputActions', {'BNC1', 0});
     sma = AddState(sma, 'Name', 'Optotag', ... 
         'Timer', OptotagStateDuration,...
         'StateChangeConditions', {'Tup', 'ITI'},...
-        'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0}); % BNC1 off, BNC2 for red lamp ON
+        'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0}); 
 
     % Add reward state so pokes plot doesn't get messed up:
     sma = AddState(sma,'Name','Reward','Timer',0,'StateChangeConditions',{},'OutputActions',{}); 
@@ -656,18 +649,17 @@ toc;
 
 
 %% Turn off red lamps
-sma = NewStateMatrix();
-sma = AddState(sma, 'Name', 'TurnOffLamps',...
-            'Timer', 0.1,...
-            'StateChangeConditions', {'Tup', 'exit'},...
-            'OutputActions', {'BNC2',0});
-SendStateMatrix(sma);
-% Handle pauses and exit if the user ended the session
-HandlePauseCondition;
-if BpodSystem.Status.BeingUsed == 0
-    fprintf('Protocol stopped by user at trial %d\n', currentTrial);
-    ModuleWrite('ValveModule1', ['B' 0]); % make sure the odor valves are closed
-    return
+RedLampOff = 0;
+while ~RedLampOff
+    answer = questdlg('Is the Red Lamp OFF?', ...
+	'Yes','No');
+    switch answer
+        case 'Yes'
+            RedLampOff = 1;
+        case 'No'
+            disp('Please turn on red lamp')
+            RedLampOff = 0;
+    end
 end
 
 clear W;
