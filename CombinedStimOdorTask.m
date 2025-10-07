@@ -17,7 +17,7 @@ while ~airON
     end
 end
 
-COM_Ports = readtable(fullfile(BpodSystem.DataPath, '..\COM_Ports.txt')); % get COM ports from text file (ignored by git)
+COM_Ports = readtable('..\COM_Ports.txt'); % get COM ports from text file (ignored by git)
 
 %% Setup (runs once before the first trial)
 
