@@ -62,12 +62,12 @@ S.ITIMin_odor = 17;
 S.ITIMax_odor = 20;
 
 %% Parameters from StimPatterns_FreeWater_7Pattern.m
-S.NumPatterns = 3;
+S.NumPatterns = 4;
 
 % Num trials
 S.NumOptotagTrials1 = 60;
-S.NumStimTrials1 = 3*15;
-S.NumStimTrials2 = 3*15;
+S.NumStimTrials1 = 4*15;
+S.NumStimTrials2 = 4*15;
 S.NumOptotagTrials2 = 60;
 
 
@@ -75,12 +75,8 @@ S.NumOptotagTrials2 = 60;
 S.ITIMean_stim = 12;
 S.ITIMin_stim = 8;
 S.ITIMax_stim = 20;
-<<<<<<< HEAD
 
 S.ForeperiodDuration = 0.5; 
-=======
-S.ForeperiodDuration = 0.5; % ????
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
 
 S.StimPower_mW = 1; % input('Stim LED power (mW): ');
 S.PulseDur = 0.005;
@@ -130,15 +126,19 @@ waveform_3secSquare_20Hz(1:(S.PulseDur * SR)) = 5;
 waveform_3secSquare_20Hz = repmat(waveform_3secSquare_20Hz,1,60);
 W.loadWaveform(3,waveform_3secSquare_20Hz);
 
-% 4) Optotag message (one 20 ms pulse)
+% 4) 4 sec sine wave pulse at 0.5 Hz
+waveform_sine_pulse_05Hz = SinePulse(0.5, 4);
+W.loadWaveform(4,waveform_sine_pulse_05Hz);
+
+% 5) Optotag message (one 20 ms pulse)
 waveform_optotag = zeros(1,round(SR/S.OptotagPulseFreq));
 waveform_optotag(1:(S.OptotagPulseDur * SR)) = 5;
 waveform_optotag = repmat(waveform_optotag,1,S.OptotagPulseNum);
-W.loadWaveform(4,waveform_optotag);
+W.loadWaveform(5,waveform_optotag);
 
 %% LED 
 LED_waveform = [ones(1, SR*S.TrialStartSignal) * 5, zeros(1, SR*0.01)]; % 5V for TrialStartSignal duration, then 0V briefly
-W.loadWaveform(5, LED_waveform); % Add waveform to channel 3, index 1
+W.loadWaveform(6, LED_waveform); % Add waveform to channel 3, index 1
 channel = 4;
 
 % load waveforms to WavePlayer:
@@ -251,7 +251,6 @@ while ~RedLampOn
     end
 end
 
-<<<<<<< HEAD
 pause(1);
 
 % bncChannels = find(BpodSystem.HardwareState.OutputType == 'B');
@@ -276,33 +275,12 @@ pause(1);
 % end
 
 total_trial_ctr = 0;
-=======
-%% Start Protocol
-RedLampOn = 0;
-while ~RedLampOn
-    answer = questdlg('Is the Red Lamp ON?', ...
-	'Yes','No');
-    switch answer
-        case 'Yes'
-            RedLampOn = 1;
-        case 'No'
-            disp('Please turn on red lamp')
-            RedLampOn = 0;
-    end
-end
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
-
-total_trial_ctr = 0;
 
 %% Optotag1
 tic
 fprintf('\nOptotag1 (%d trials)\n', S.NumOptotagTrials1);
 for currentTrial = 1:S.NumOptotagTrials1
-<<<<<<< HEAD
 
-=======
-    
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
     total_trial_ctr = total_trial_ctr+1;
     
     % Calculate ITI for this trial
@@ -315,7 +293,6 @@ for currentTrial = 1:S.NumOptotagTrials1
     sma = AddState(sma,'Name','Foreperiod',...
         'Timer',S.ForeperiodDuration,...
         'StateChangeConditions',{'Tup','Optotag'},...
-<<<<<<< HEAD
         'OutputActions',{'BNC1',1, 'BNC2',1});
     sma = AddState(sma, 'Name', 'Optotag', ... 
         'Timer', OptotagStateDuration,...
@@ -325,17 +302,6 @@ for currentTrial = 1:S.NumOptotagTrials1
         'Timer', ITIDuration,...
         'StateChangeConditions', {'Tup','exit'},...
         'OutputActions', {'BNC1',0, 'BNC2',0});
-=======
-        'OutputActions',{'BNC1',1});
-    sma = AddState(sma, 'Name', 'Optotag', ... 
-        'Timer', OptotagStateDuration,...
-        'StateChangeConditions', {'Tup', 'ITI'},...
-        'OutputActions', {'WavePlayer1', S.NumPatterns+1, 'BNC1', 0}); 
-    sma = AddState(sma, 'Name', 'ITI', ... 
-        'Timer', ITIDuration,...
-        'StateChangeConditions', {'Tup','exit'},...
-        'OutputActions', {'BNC1',0});
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
 
     % Add the odor states so that pokes plot doesn't get messed up:
     for tt = 1:S.NumPatterns
@@ -396,11 +362,7 @@ for currentTrial = 1:S.NumStimTrials1
     sma = AddState(sma, 'Name', 'Foreperiod',...
         'Timer', S.ForeperiodDuration,...
         'StateChangeConditions', {'Tup', Stim_state},...
-<<<<<<< HEAD
         'OutputActions', {'BNC1', 1, 'BNC2',1}); % BNC1 for sync pulse
-=======
-        'OutputActions', {'BNC1', 1}); % BNC1 for sync pulse
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
     for tt = 1:S.NumPatterns
         sma = AddState(sma, 'Name', sprintf('Stim%d',tt),...
             'Timer', 2,... % Assuming 2 seconds for stim duration, adjust if necessary
@@ -414,11 +376,7 @@ for currentTrial = 1:S.NumStimTrials1
     sma = AddState(sma, 'Name', 'Optotag', ... 
         'Timer', OptotagStateDuration,...
         'StateChangeConditions', {'Tup', 'ITI'},...
-<<<<<<< HEAD
         'OutputActions', {'WavePlayer1', S.NumPatterns+1, 'BNC1', 0, 'BNC2',0}); 
-=======
-        'OutputActions', {'WavePlayer1', S.NumPatterns+1, 'BNC1', 0}); 
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
 
     % Send state machine to Bpod device
     SendStateMatrix(sma);
@@ -448,13 +406,7 @@ fprintf('Stim trials1 finished\n');
 toc;
 %%
 
-<<<<<<< HEAD
 % Turn off red lamps
-=======
-pause(10);
-
-%% Turn off red lamps
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
 RedLampOff = 0;
 while ~RedLampOff
     answer = questdlg('Is the Red Lamp OFF?', ...
@@ -507,20 +459,12 @@ for currentTrial = 1:S.NumOdorTrials
         sma = AddState(sma, 'Name', 'Reward',...
             'Timer', RewardValveTime,...
             'StateChangeConditions', {'Tup', 'ITI'},...
-<<<<<<< HEAD
             'OutputActions', {'ValveState',1,'BNC1',1, 'BNC2',1}); 
-=======
-            'OutputActions', {'ValveState',1,'BNC1',1}); 
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
     else % (LED -> odor delay -> odor -> reward delay -> reward -> ITI)
         sma = AddState(sma, 'Name', 'TrialStartSignal',...
             'Timer', S.TrialStartSignal,...
             'StateChangeConditions', {'Tup', 'OdorDelay'},...
-<<<<<<< HEAD
             'OutputActions', {'WavePlayer1', S.NumPatterns+2, 'BNC1', 1, 'BNC2',1}); 
-=======
-            'OutputActions', {'WavePlayer1', S.NumTrials+2, 'BNC1', 1}); 
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
         sma = AddState(sma, 'Name', 'OdorDelay',...
             'Timer', S.OdorDelay,...
             'StateChangeConditions', {'Tup', CS_state},...
@@ -529,28 +473,16 @@ for currentTrial = 1:S.NumOdorTrials
             sma = AddState(sma, 'Name', sprintf('CS%d',tt),...
                 'Timer', S.OdorDuration,...
                 'StateChangeConditions', {'Tup', 'RewardDelay'},...
-<<<<<<< HEAD
                 'OutputActions', {'ValveModule1', ValveMessage,'BNC1', 0, 'BNC2',0}); 
-=======
-                'OutputActions', {'ValveModule1', ValveMessage,'BNC1', 0}); 
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
         end 
         sma = AddState(sma, 'Name', 'RewardDelay',...
             'Timer', RewardDelays_Odor(currentTrial),...
             'StateChangeConditions', {'Tup', 'Reward'},...
-<<<<<<< HEAD
             'OutputActions', {'ValveModule1', 1,'BNC1', 0, 'BNC2',0}); 
         sma = AddState(sma, 'Name', 'Reward',...
             'Timer', RewardValveTime,...
             'StateChangeConditions', {'Tup', 'ITI'},...
             'OutputActions', {'ValveState',1,'BNC1', 0, 'BNC2',0});
-=======
-            'OutputActions', {'ValveModule1', 1,'BNC1', 0}); 
-        sma = AddState(sma, 'Name', 'Reward',...
-            'Timer', RewardValveTime,...
-            'StateChangeConditions', {'Tup', 'ITI'},...
-            'OutputActions', {'ValveState',1,'BNC1', 0});
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
     end  
     sma = AddState(sma, 'Name', 'ITI',...
         'Timer', ITIDuration,...
@@ -595,13 +527,8 @@ toc;
 fprintf('\nOdor trials finished\n');
 
 pause(10);
-<<<<<<< HEAD
 %%
 % Turn on red lamps
-=======
-
-%% Turn on red lamps
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
 RedLampOn = 0;
 while ~RedLampOn
     answer = questdlg('Is the Red Lamp ON?', ...
@@ -650,37 +577,21 @@ for currentTrial = 1:S.NumStimTrials2
     sma = AddState(sma, 'Name', 'Foreperiod',...
         'Timer', S.ForeperiodDuration,...
         'StateChangeConditions', {'Tup', Stim_state},...
-<<<<<<< HEAD
         'OutputActions', {'BNC1', 1, 'BNC2',1}); 
-=======
-        'OutputActions', {'BNC1', 1}); 
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
     for tt = 1:S.NumPatterns
         sma = AddState(sma, 'Name', sprintf('Stim%d',tt),...
             'Timer', 2,... % Assuming 2 seconds for stim duration, adjust if necessary
             'StateChangeConditions', {'Tup', 'ITI'},...
-<<<<<<< HEAD
             'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0, 'BNC2',0}); 
-=======
-            'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0}); 
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
     end
     sma = AddState(sma, 'Name', 'ITI',...
         'Timer', ITIDuration,...
         'StateChangeConditions', {'Tup', 'exit'},...
-<<<<<<< HEAD
         'OutputActions', {'BNC1', 0, 'BNC2',0});
     sma = AddState(sma, 'Name', 'Optotag', ... 
         'Timer', OptotagStateDuration,...
         'StateChangeConditions', {'Tup', 'ITI'},...
         'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0, 'BNC2',0}); 
-=======
-        'OutputActions', {'BNC1', 0});
-    sma = AddState(sma, 'Name', 'Optotag', ... 
-        'Timer', OptotagStateDuration,...
-        'StateChangeConditions', {'Tup', 'ITI'},...
-        'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0}); 
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
 
     % Add reward state so pokes plot doesn't get messed up:
     sma = AddState(sma,'Name','Reward','Timer',0,'StateChangeConditions',{},'OutputActions',{}); 
@@ -732,7 +643,6 @@ for currentTrial = 1:S.NumOptotagTrials2
     sma = AddState(sma,'Name','Foreperiod',...
         'Timer',S.ForeperiodDuration,...
         'StateChangeConditions',{'Tup','Optotag'},...
-<<<<<<< HEAD
         'OutputActions',{'BNC1',1, 'BNC2',1});
     sma = AddState(sma, 'Name', 'Optotag', ... 
         'Timer', OptotagStateDuration,...
@@ -742,17 +652,6 @@ for currentTrial = 1:S.NumOptotagTrials2
         'Timer', ITIDuration,...
         'StateChangeConditions', {'Tup','exit'},...
         'OutputActions', {'BNC1',0, 'BNC2',0});
-=======
-        'OutputActions',{'BNC1',1});
-    sma = AddState(sma, 'Name', 'Optotag', ... 
-        'Timer', OptotagStateDuration,...
-        'StateChangeConditions', {'Tup', 'ITI'},...
-        'OutputActions', {'WavePlayer1', S.NumTrials+1, 'BNC1', 0}); 
-    sma = AddState(sma, 'Name', 'ITI', ... 
-        'Timer', ITIDuration,...
-        'StateChangeConditions', {'Tup','exit'},...
-        'OutputActions', {'BNC1',0});
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
 
     % Add the odor states so that pokes plot doesn't get messed up:
     for tt = 1:S.NumPatterns
@@ -784,11 +683,7 @@ fprintf('Optotag2 finished\n');
 toc;
 
 
-<<<<<<< HEAD
 % Turn off red lamps
-=======
-%% Turn off red lamps
->>>>>>> 5ed987c66a0c1da046a89c3e52b18dc52d3a3f5c
 RedLampOff = 0;
 while ~RedLampOff
     answer = questdlg('Is the Red Lamp OFF?', ...
@@ -807,3 +702,42 @@ clear W;
 fprintf('\nProtocol finished\n')
 
 end
+
+
+
+function waveform_sine_pulse = SinePulse(freq, target_end_time)
+    % freq = 0.5 Hz, target_end_time = 3 sec
+    
+    SR = 10000; % sampling rate 
+    PulseDur = 0.005;
+    IPI_min = 0.04;  
+    IPI_max = 0.1; 
+    
+    IPI_func = @(t, freq, A, off)(-A*sin(2*pi*freq*t)) + off;
+    % value_func = @(t, freq, A, off)(A*sin(2*pi*freq*t)) + off;
+    % derivative_func = @(t, freq, A, off)(2*pi*freq*cos(2*pi*freq*t));
+    % td_func = @(t, freq, A)(derivative_func(t, freq, A) + value_func(t, freq, A, off)*log(r));
+    
+    waveform_sine_pulse = zeros(round(target_end_time*SR), 1);
+    t_curr = 0.0;
+    pulse_count = 0;
+    
+    while t_curr < target_end_time
+        amp = IPI_func(t_curr, freq, 20, 20);
+        ipi = IPI_min + (amp / 20) * (IPI_max - IPI_min) ;
+    
+        t_next = t_curr + ipi;
+        startIdx =  floor(t_curr * SR) + 1;
+        endIdx = floor((t_curr+PulseDur) * SR);
+    
+        if endIdx > numel(waveform_sine_pulse)
+            endIdx = numel(waveform_sine_pulse);
+        end
+        waveform_sine_pulse(startIdx:endIdx) = 5;
+        t_curr = t_next;
+        pulse_count = pulse_count + 1;
+    end
+    fprintf('\npulse count %d at %.1f frequency\n', pulse_count, freq)
+    figure;
+    plot(waveform_sine_pulse);
+    end
