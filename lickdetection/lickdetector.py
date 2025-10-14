@@ -76,12 +76,25 @@ def detect_licks(video_path, roi, threshold=30, min_movement_percent=25, cooldow
     # Translate percentage to a pixel count threshold based on ROI size
     min_changed_pixels = (roi_area * (min_movement_percent / 100.0)) if roi_area > 0 else float('inf')
     
-    # Read the first frame
+    # Get video properties first
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    # Calculate middle frame position
+    middle_frame = total_frames // 2
+    
+    # Set video position to middle frame
+    cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
+    
+    # Read the middle frame as reference
     ret, prev_frame = cap.read()
     if not ret:
-        print("Error: Could not read the first frame.")
+        print("Error: Could not read the middle frame.")
         cap.release()
         return None, None, None, None, None # Added None for lick_frames
+    
+    # Reset video position to beginning for processing
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     prev_roi_gray = cv2.cvtColor(prev_frame[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
     prev_roi_blur = cv2.GaussianBlur(prev_roi_gray, (21, 21), 0)
@@ -90,10 +103,6 @@ def detect_licks(video_path, roi, threshold=30, min_movement_percent=25, cooldow
     # Initialize lick_frames as a NumPy array of zeros with the same length as synced_gpio_file
     lick_frames_array = np.zeros(len(synced_gpio_file), dtype=int)
     in_cooldown = 0
-    
-    # Get video properties
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # Calculate delay for cv2.waitKey
     wait_key_delay = 1 if fps == 0 else max(1, int(1000 / (fps * playback_speed)))
@@ -276,14 +285,13 @@ if __name__ == "__main__":
                     'selected_roi': selected_roi,
                     'lick_frames_array': lick_frames # Save as array
                 }, f)
-            print(f"Data saved to {temp_data_file}")
-
-    
+            print(f"Data saved to {temp_data_file}")    
     synced_gpio_file['lickframe'] = lick_frames
     # no none rows 
     synced_gpio_file = synced_gpio_file[synced_gpio_file['trialtype']!='None']
     unique_trial_type = np.sort(synced_gpio_file['trialtype'].unique())
-    
+    unique_trial_type = unique_trial_type[1:]
+
     all_lick_rates_per_trial_type = {} # Dictionary to store organized lick rates
 
     window = 6
@@ -298,9 +306,9 @@ if __name__ == "__main__":
             lick_rates_per_second = []
             # Iterate through the trial in 1-second (frames_per_second) chunks
             half_fps = int(fps/window)
-            for i in range(0, len(single_trial_df), half_fps):
+            for i in range(half_fps, len(single_trial_df)-half_fps, half_fps):
                 # Extract a 1-second chunk of lick_frames
-                chunk = single_trial_df['lickframe'].iloc[i : i + half_fps]
+                chunk = single_trial_df['lickframe'].iloc[i-half_fps : i]
                 # Count licks (number of 0.5 s) in this chunk
                 licks_in_second = chunk.sum()*window
                 lick_rates_per_second.append(licks_in_second)
@@ -311,7 +319,7 @@ if __name__ == "__main__":
     # plot mean and sem to represent trials in each trial type
     plt.figure(figsize=(20, 8))
     color_map = {
-        0: np.array([41, 114, 112]) / 255,
+        # 0: np.array([41, 114, 112]) / 255,
         1: np.array([230, 109, 80]) / 255,
         2: np.array([231, 198, 107]) / 255,
         3: np.array([138, 176, 124]) / 255,
@@ -369,8 +377,9 @@ if __name__ == "__main__":
     plt.ylabel("Licks / s")
     plt.title(f'{mouse_id}_{date}')
     fig_root_dir = Path(r"\\140.247.90.110\homes2\Carol\LickData")
-    fig_file_name = f'{mouse_id}_{date}.png'
+    fig_file_name = f'{mouse_id}_{date}.pdf'
     full_fig_path = fig_root_dir / fig_file_name
     full_fig_path.parent.mkdir(parents=True, exist_ok=True) # Ensure directory exists
     plt.savefig(full_fig_path)
-    plt.show()
+    # plt.show()
+
