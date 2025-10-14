@@ -62,12 +62,12 @@ S.ITIMin_odor = 17;
 S.ITIMax_odor = 20;
 
 %% Parameters from StimPatterns_FreeWater_7Pattern.m
-S.NumPatterns = 3;
+S.NumPatterns = 4;
 
 % Num trials
 S.NumOptotagTrials1 = 60;
-S.NumStimTrials1 = 3*15;
-S.NumStimTrials2 = 3*15;
+S.NumStimTrials1 = 4*15;
+S.NumStimTrials2 = 4*15;
 S.NumOptotagTrials2 = 60;
 
 
@@ -126,15 +126,19 @@ waveform_3secSquare_20Hz(1:(S.PulseDur * SR)) = 5;
 waveform_3secSquare_20Hz = repmat(waveform_3secSquare_20Hz,1,60);
 W.loadWaveform(3,waveform_3secSquare_20Hz);
 
-% 4) Optotag message (one 20 ms pulse)
+% 4) 4 sec sine wave pulse at 0.5 Hz
+waveform_sine_pulse_05Hz = SinePulse(0.5, 4);
+W.loadWaveform(4,waveform_sine_pulse_05Hz);
+
+% 5) Optotag message (one 20 ms pulse)
 waveform_optotag = zeros(1,round(SR/S.OptotagPulseFreq));
 waveform_optotag(1:(S.OptotagPulseDur * SR)) = 5;
 waveform_optotag = repmat(waveform_optotag,1,S.OptotagPulseNum);
-W.loadWaveform(4,waveform_optotag);
+W.loadWaveform(5,waveform_optotag);
 
 %% LED 
 LED_waveform = [ones(1, SR*S.TrialStartSignal) * 5, zeros(1, SR*0.01)]; % 5V for TrialStartSignal duration, then 0V briefly
-W.loadWaveform(5, LED_waveform); % Add waveform to channel 3, index 1
+W.loadWaveform(6, LED_waveform); % Add waveform to channel 3, index 1
 channel = 4;
 
 % load waveforms to WavePlayer:
@@ -698,3 +702,42 @@ clear W;
 fprintf('\nProtocol finished\n')
 
 end
+
+
+
+function waveform_sine_pulse = SinePulse(freq, target_end_time)
+    % freq = 0.5 Hz, target_end_time = 3 sec
+    
+    SR = 10000; % sampling rate 
+    PulseDur = 0.005;
+    IPI_min = 0.04;  
+    IPI_max = 0.1; 
+    
+    IPI_func = @(t, freq, A, off)(-A*sin(2*pi*freq*t)) + off;
+    % value_func = @(t, freq, A, off)(A*sin(2*pi*freq*t)) + off;
+    % derivative_func = @(t, freq, A, off)(2*pi*freq*cos(2*pi*freq*t));
+    % td_func = @(t, freq, A)(derivative_func(t, freq, A) + value_func(t, freq, A, off)*log(r));
+    
+    waveform_sine_pulse = zeros(round(target_end_time*SR), 1);
+    t_curr = 0.0;
+    pulse_count = 0;
+    
+    while t_curr < target_end_time
+        amp = IPI_func(t_curr, freq, 20, 20);
+        ipi = IPI_min + (amp / 20) * (IPI_max - IPI_min) ;
+    
+        t_next = t_curr + ipi;
+        startIdx =  floor(t_curr * SR) + 1;
+        endIdx = floor((t_curr+PulseDur) * SR);
+    
+        if endIdx > numel(waveform_sine_pulse)
+            endIdx = numel(waveform_sine_pulse);
+        end
+        waveform_sine_pulse(startIdx:endIdx) = 5;
+        t_curr = t_next;
+        pulse_count = pulse_count + 1;
+    end
+    fprintf('\npulse count %d at %.1f frequency\n', pulse_count, freq)
+    figure;
+    plot(waveform_sine_pulse);
+    end
