@@ -17,37 +17,116 @@ import pickle # Added import for pickle
 # except ImportError:
 #     pass # cv2.cuda is not available
 
-def select_roi(video_path):
+# def select_roi(video_path):
+#     """
+#     Loads the first frame of a video and allows the user to select a Region of Interest (ROI).
+
+#     Args:
+#         video_path (str): The path to the video file.
+
+#     Returns:
+#         tuple: (x, y, w, h) of the selected ROI, or None if no ROI is selected.
+#     """
+#     cap = cv2.VideoCapture(video_path)
+#     if not cap.isOpened():
+#         print(f"Error: Could not open video file {video_path}")
+#         return None
+
+#     ret, frame = cap.read()
+#     if not ret:
+#         print("Error: Could not read the first frame.")
+#         return None
+
+#     cap.release()
+
+#     # Select ROI
+#     roi = cv2.selectROI("Select ROI", frame, fromCenter=False, showCrosshair=True)
+#     cv2.destroyWindow("Select ROI")
+
+#     x, y, w, h = roi
+#     if w > 0 and h > 0:
+#         return (x, y, w, h)
+#     else:
+#         return None
+
+def select_roi(
+    video_path,
+    *,
+    source_frame="middle",         # "middle" | "first" | "last" or use frame_index
+    frame_index=None,              # if set (int), overrides source_frame
+    skip_head_seconds=0.0,         # optionally ignore a bright/noisy head chunk
+    skip_tail_seconds=0.0,         # optionally ignore a bright/noisy tail chunk
+    from_center=False,
+    show_crosshair=True,
+    window_title=None,
+):
     """
-    Loads the first frame of a video and allows the user to select a Region of Interest (ROI).
+    Open a single frame for user ROI (Region of Interest) selection.
 
     Args:
-        video_path (str): The path to the video file.
+        video_path (str or Path): Video file.
+        source_frame (str): "middle" (default), "first", or "last". Ignored if frame_index is not None.
+        frame_index (int|None): Exact frame index to show for ROI selection.
+        skip_head_seconds (float): Seconds to skip at the beginning when computing 'middle'.
+        skip_tail_seconds (float): Seconds to skip at the end when computing 'middle'.
+        from_center (bool): cv2.selectROI option.
+        show_crosshair (bool): cv2.selectROI option.
+        window_title (str|None): Optional window title.
 
     Returns:
-        tuple: (x, y, w, h) of the selected ROI, or None if no ROI is selected.
+        tuple|None: (x, y, w, h) or None if selection was canceled/invalid.
     """
-    cap = cv2.VideoCapture(video_path)
+
+    cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         print(f"Error: Could not open video file {video_path}")
         return None
 
-    ret, frame = cap.read()
-    if not ret:
-        print("Error: Could not read the first frame.")
-        return None
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+
+    # Compute a safe target frame
+    if frame_index is not None:
+        target = max(0, min(total_frames - 1, int(frame_index)))
+    else:
+        if source_frame == "first":
+            target = 0
+        elif source_frame == "last":
+            target = max(0, total_frames - 1)
+        else:
+            # "middle" inside the usable window (skip head/tail if requested)
+            if fps > 0:
+                start_det = int(max(0, round(skip_head_seconds * fps)))
+                end_det = int(max(0, total_frames - 1 - round(skip_tail_seconds * fps)))
+                if end_det <= start_det:
+                    start_det, end_det = 0, max(0, total_frames - 1)
+            else:
+                start_det, end_det = 0, max(0, total_frames - 1)
+            target = (start_det + end_det) // 2
+
+    # Seek and read
+    cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+    ok, frame = cap.read()
+    if not ok:
+        # Fallback to first frame if middle read fails
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        ok, frame = cap.read()
+        if not ok:
+            print("Error: Could not read a frame for ROI selection.")
+            cap.release()
+            return None
 
     cap.release()
 
-    # Select ROI
-    roi = cv2.selectROI("Select ROI", frame, fromCenter=False, showCrosshair=True)
-    cv2.destroyWindow("Select ROI")
+    # Title shows where this came from
+    title = window_title or f"Select ROI (frame {target+1}/{total_frames})"
+    roi = cv2.selectROI(title, frame, fromCenter=from_center, showCrosshair=show_crosshair)
+    cv2.destroyWindow(title)
 
     x, y, w, h = roi
     if w > 0 and h > 0:
-        return (x, y, w, h)
-    else:
-        return None
+        return (int(x), int(y), int(w), int(h))
+    return None
 
 #  def detect_licks(video_path, roi, threshold=30, min_movement_percent=25, cooldown_frames=2, show_video_with_licks=False, playback_speed=0.5, synced_gpio_file=None):
     """
@@ -724,7 +803,13 @@ if __name__ == "__main__":
             roi_input = input("Enter ROI as (x, y, w, h): ")
             selected_roi = tuple(map(int, roi_input.strip("()").split(",")))
         else:
-            selected_roi = select_roi(str(video_path))
+            # choose the middle of the *usable* segment for clearer ROI selection
+            selected_roi = select_roi(
+                video_path,
+                source_frame="middle",
+                skip_head_seconds=0.0,   # e.g., 10.0 if the first 10 s aren't relevant
+                skip_tail_seconds=0.0,   # e.g., 10.0 if the last 10 s aren't relevant
+            )
 
         if not selected_roi:
             print("No ROI selected; exiting.")
