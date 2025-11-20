@@ -13,8 +13,15 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
     sync_pulse_start_frame = parse_gpio_data[(parse_gpio_data['pulse1'].diff() > 0)].index
     sync_pulse_end_frame = parse_gpio_data[(parse_gpio_data['pulse1'].diff() < 0)].index-1
     # one time I forgot to restart the video after I restarted the protocol, so I only need the last 110 sync pulse
-    sync_pulse_start_frame = sync_pulse_start_frame[-110:]
-    sync_pulse_end_frame = sync_pulse_end_frame[-110:]
+    ###### this part is changed ############################
+    print('total number of trials: ' + str(len(sync_pulse_start_frame)))
+    # sync_pulse_start_frame = sync_pulse_start_frame[-110:] # [change here]
+    # sync_pulse_end_frame = sync_pulse_end_frame[-110:]
+    sync_pulse_start_frame = sync_pulse_start_frame[60+45:60+45+110]
+    sync_pulse_end_frame = sync_pulse_end_frame[60+45:60+45+110]
+    # sync_pulse_start_frame = sync_pulse_start_frame[5:5+110]
+    # sync_pulse_end_frame = sync_pulse_end_frame[5:5+110]
+    #########################################################
     sync_pulse_start_timestamp = parse_gpio_data.loc[sync_pulse_start_frame, 'timestamp']
     sync_pulse_end_timestamp =  parse_gpio_data.loc[sync_pulse_end_frame, 'timestamp']
     parse_gpio_data['syncpulse'] = np.where(parse_gpio_data['pulse1'] > 0, 'syncpulse', 'None')
@@ -26,15 +33,14 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
 
     # Access the top-level 'SessionData' struct.
     # It often loads as a single-element object array.
-    SessionData = bpod_data['SessionData']
+    SessionData = bpod_data['SessionData'] 
     field_names = [attr for attr in dir(SessionData) if not attr.startswith('__')]
     # print(f"SessionData contains the following fields: {field_names}")
-
     # Access nested fields. The exact access depends on the structure.
     # With squeeze_me=True, you often don't need [0, 0].
     try:
         TrialSettings = SessionData.TrialSettings[0]
-        trialSettings_field_names = [attr for attr in dir(TrialSettings) if not attr.startswith('__')]
+        # trialSettings_field_names = [attr for attr in dir(TrialSettings) if not attr.startswith('__')]
         # print(f"TrialSettings contains the following fields: {trialSettings_field_names}")
         LED = TrialSettings.TrialStartSignal # LED duration before odor presentation
         OdorDelay = TrialSettings.OdorDelay # odor delay after LED
@@ -45,11 +51,18 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
     except AttributeError as e:
         print(f"Error accessing field: {e}. Check the exact structure of your .mat file.")
 
-
-    TrialTypes = SessionData.TrialTypes
-    TrialStartTimestamp = SessionData.TrialStartTimestamp # in sec
-    TrialEndTimestamp = SessionData.TrialEndTimestamp
-
+    ######### this part is changed ########
+    TrialTypes = SessionData.TrialTypes_Odor[-110:] # [change here]
+    # TrialTypes = SessionData.TrialTypes[-110:]
+    print(TrialTypes)
+    # TrialStartTimestamp = SessionData.TrialStartTimestamp # in sec
+    # TrialEndTimestamp = SessionData.TrialEndTimestamp
+    TrialStartTimestamp = SessionData.TrialStartTimestamp[60+45:60+45+110] # in sec # [change here]
+    TrialEndTimestamp = SessionData.TrialEndTimestamp[60+45:60+45+110] 
+    # TrialStartTimestamp = SessionData.TrialStartTimestamp[5:5+110] # in sec
+    # TrialEndTimestamp = SessionData.TrialEndTimestamp[5:5+110] 
+    print('total number of odor trials: ' + str(len(TrialEndTimestamp)))
+    #######################################
     fps = 30
     state = np.full(len(parse_gpio_data), 'None', dtype=object) # LED, OdorDelay, Odor, RewardDelay, Reward, ITI
     trial_type_col = np.full(len(parse_gpio_data), 'None', dtype=object) # 0 = free reward, 1 = Odor1, 2 = Odor2, etc
@@ -91,9 +104,15 @@ def sync_bpod_video(gpio_file_path, bpod_data_path):
             tasktime = LED + OdorDelay + RewardDelay[TrialTypes[i]-1] + RewardValveTime
             s = paint(s, trial_duration_sec - tasktime , 'ITI', 'down')
 
-
     parse_gpio_data['state'] = state
     parse_gpio_data['trialtype'] = trial_type_col
     parse_gpio_data['trialstarttime'] = trial_start_time_col
     parse_gpio_data.to_csv('tmp.csv')
     return parse_gpio_data
+
+# gpio_file_path = r"\\140.247.90.110\homes2\Carol\VideoData\CC4_20251007_114439_gpio1.csv"
+# bpod_data_path = r"\\140.247.90.110\homes2\Carol\FakeSubject_CombinedStimOdorTask_20251008_175512.mat"
+
+# sync_bpod_video(gpio_file_path, bpod_data_path)
+
+# modify # [change here]

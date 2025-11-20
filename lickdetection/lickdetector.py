@@ -6,12 +6,6 @@ from pathlib import Path
 import sync_data
 import pickle # Added import for pickle
 
-try:
-    import cv2.cuda
-    if cv2.cuda.getCudaEnabledDeviceCount() > 0:
-        cuda_available = True
-except ImportError:
-    pass # cv2.cuda is not available
 
 def select_roi(video_path):
     """

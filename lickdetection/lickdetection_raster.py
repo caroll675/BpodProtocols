@@ -1,276 +1,94 @@
+# === lickdetection_full.py ===
 import cv2
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
-import sync_data
-import pickle # Added import for pickle
+import pickle
+import sync_data  # your existing module
 
-# cuda_available = False # Initialize globally
 
-# try:
-#     import cv2.cuda
-#     if cv2.cuda.getCudaEnabledDeviceCount() > 0:
-#         cuda_available = True
-#         print('use cuda')
-# except ImportError:
-#     pass # cv2.cuda is not available
-
-# def select_roi(video_path):
-#     """
-#     Loads the first frame of a video and allows the user to select a Region of Interest (ROI).
-
-#     Args:
-#         video_path (str): The path to the video file.
-
-#     Returns:
-#         tuple: (x, y, w, h) of the selected ROI, or None if no ROI is selected.
-#     """
-#     cap = cv2.VideoCapture(video_path)
-#     if not cap.isOpened():
-#         print(f"Error: Could not open video file {video_path}")
-#         return None
-
-#     ret, frame = cap.read()
-#     if not ret:
-#         print("Error: Could not read the first frame.")
-#         return None
-
-#     cap.release()
-
-#     # Select ROI
-#     roi = cv2.selectROI("Select ROI", frame, fromCenter=False, showCrosshair=True)
-#     cv2.destroyWindow("Select ROI")
-
-#     x, y, w, h = roi
-#     if w > 0 and h > 0:
-#         return (x, y, w, h)
-#     else:
-#         return None
-
+# ----------------------------
+# ROI (Region of Interest) selection from a representative frame (default: middle)
+# ----------------------------
 def select_roi(
     video_path,
     *,
-    source_frame="middle",         # "middle" | "first" | "last" or use frame_index
-    frame_index=None,              # if set (int), overrides source_frame
-    skip_head_seconds=0.0,         # optionally ignore a bright/noisy head chunk
-    skip_tail_seconds=0.0,         # optionally ignore a bright/noisy tail chunk
+    source_frame="middle",         # "middle" | "first" | "last" (ignored if frame_index is set)
+    frame_index=None,              # exact frame to use for ROI selection
+    skip_head_seconds=0.0,         # ignore head when computing "middle"
+    skip_tail_seconds=0.0,         # ignore tail when computing "middle"
     from_center=False,
     show_crosshair=True,
     window_title=None,
 ):
     """
-    Open a single frame for user ROI (Region of Interest) selection.
-
-    Args:
-        video_path (str or Path): Video file.
-        source_frame (str): "middle" (default), "first", or "last". Ignored if frame_index is not None.
-        frame_index (int|None): Exact frame index to show for ROI selection.
-        skip_head_seconds (float): Seconds to skip at the beginning when computing 'middle'.
-        skip_tail_seconds (float): Seconds to skip at the end when computing 'middle'.
-        from_center (bool): cv2.selectROI option.
-        show_crosshair (bool): cv2.selectROI option.
-        window_title (str|None): Optional window title.
+    Open a single frame for user ROI selection.
 
     Returns:
-        tuple|None: (x, y, w, h) or None if selection was canceled/invalid.
+        (roi_tuple, frame_index) or (None, None)
+        where roi_tuple = (x, y, w, h)
     """
-
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         print(f"Error: Could not open video file {video_path}")
-        return None
+        return None, None
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
 
-    # Compute a safe target frame
+    if total_frames <= 0:
+        print("Error: Video has zero frames.")
+        cap.release()
+        return None, None
+
+    # Compute target frame
     if frame_index is not None:
         target = max(0, min(total_frames - 1, int(frame_index)))
     else:
         if source_frame == "first":
             target = 0
         elif source_frame == "last":
-            target = max(0, total_frames - 1)
+            target = total_frames - 1
         else:
             # "middle" inside the usable window (skip head/tail if requested)
             if fps > 0:
                 start_det = int(max(0, round(skip_head_seconds * fps)))
                 end_det = int(max(0, total_frames - 1 - round(skip_tail_seconds * fps)))
                 if end_det <= start_det:
-                    start_det, end_det = 0, max(0, total_frames - 1)
+                    start_det, end_det = 0, total_frames - 1
             else:
-                start_det, end_det = 0, max(0, total_frames - 1)
+                start_det, end_det = 0, total_frames - 1
             target = (start_det + end_det) // 2
 
     # Seek and read
     cap.set(cv2.CAP_PROP_POS_FRAMES, target)
     ok, frame = cap.read()
     if not ok:
-        # Fallback to first frame if middle read fails
+        # Fallback to first frame
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         ok, frame = cap.read()
         if not ok:
             print("Error: Could not read a frame for ROI selection.")
             cap.release()
-            return None
+            return None, None
 
     cap.release()
 
-    # Title shows where this came from
     title = window_title or f"Select ROI (frame {target+1}/{total_frames})"
     roi = cv2.selectROI(title, frame, fromCenter=from_center, showCrosshair=show_crosshair)
     cv2.destroyWindow(title)
 
     x, y, w, h = roi
     if w > 0 and h > 0:
-        return (int(x), int(y), int(w), int(h))
-    return None
+        return (int(x), int(y), int(w), int(h)), int(target)
+    return None, None
 
-#  def detect_licks(video_path, roi, threshold=30, min_movement_percent=25, cooldown_frames=2, show_video_with_licks=False, playback_speed=0.5, synced_gpio_file=None):
-    """
-    Detects mouse licks in a video using frame differencing within a specified ROI.
-    Optionally displays the video with lick indicators and controls playback speed.
 
-    Args:
-        video_path (str): The path to the video file.
-        roi (tuple): (x, y, w, h) of the Region of Interest.
-        threshold (int): Pixel intensity difference threshold for movement detection.
-        min_movement_percent (float): Minimum percentage (0-100) of changed pixels within ROI to count as a lick.
-        cooldown_frames (int): Number of frames to ignore after detecting a lick to prevent multiple counts.
-        show_video_with_licks (bool): If True, displays the video with visual lick indicators.
-        playback_speed (float): Controls the video playback speed (1.0 for normal, <1.0 for slower, >1.0 for faster).
-        sync_pulse_periods (list): A list of [start_time, end_time] tuples for active sync pulses.
-
-    Returns:
-        list: lick_timestamps
-    """
-    syncpulse = synced_gpio_file['syncpulse']
-    state = synced_gpio_file['state']
-    trialtype = synced_gpio_file['trialtype']
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"Error: Could not open video file {video_path}")
-        return None, None, None, None, None # Added None for lick_frames
-
-    x, y, w, h = roi
-    roi_area = w * h if w > 0 and h > 0 else 0
-    # Translate percentage to a pixel count threshold based on ROI size
-    min_changed_pixels = (roi_area * (min_movement_percent / 100.0)) if roi_area > 0 else float('inf')
-    
-    # Read the first frame
-    ret, prev_frame = cap.read()
-
-    if not ret:
-        print("Error: Could not read the first frame.")
-        cap.release()
-        return None, None, None, None, None # Added None for lick_frames
-
-    prev_roi_gray = cv2.cvtColor(prev_frame[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
-    prev_roi_blur = cv2.GaussianBlur(prev_roi_gray, (21, 21), 0)
-
-    lick_timestamps = []
-    # Initialize lick_frames as a NumPy array of zeros with the same length as synced_gpio_file
-    lick_frames_array = np.zeros(len(synced_gpio_file), dtype=int)
-    in_cooldown = 0
-    
-    # Get video properties
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    # Calculate delay for cv2.waitKey
-    wait_key_delay = 1 if fps == 0 else max(1, int(1000 / (fps * playback_speed)))
-
-    frame_num = 0 # Start frame_num from 0 for correct indexing with synced_gpio_file
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        # Ensure index is within bounds of synced_gpio_file
-        if frame_num >= len(synced_gpio_file):
-            break
-
-        current_time = (frame_num / fps) if fps > 0 else 0
-        current_frame = frame_num # This is the index for lick_frames_array
-        frame_num += 1
-        current_roi = frame[y:y+h, x:x+w]
-        current_roi_gray = cv2.cvtColor(current_roi, cv2.COLOR_BGR2GRAY)
-        current_roi_blur = cv2.GaussianBlur(current_roi_gray, (21, 21), 0)
-
-        # Calculate difference
-        frame_diff = cv2.absdiff(prev_roi_blur, current_roi_blur)
-        
-        # Threshold the difference image
-        _, thresh = cv2.threshold(frame_diff, threshold, 255, cv2.THRESH_BINARY)
-        
-        # Dilate the thresholded image to fill in small holes
-        dilated = cv2.dilate(thresh, None, iterations=2)
-        
-        # Find contours (for visualization) and compute overall changed pixel count for detection
-        contours, _ = cv2.findContours(dilated.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Use percentage of changed pixels across the ROI as detection criterion
-        changed_pixels = cv2.countNonZero(dilated)
-        movement_detected = changed_pixels > min_changed_pixels
-
-        # Track largest contour for optional visualization
-        largest_contour_area = 0
-        largest_contour = None
-        if contours:
-            for contour in contours:
-                area = cv2.contourArea(contour)
-                if area > largest_contour_area:
-                    largest_contour_area = area
-                    largest_contour = contour
-        
-        if movement_detected and in_cooldown == 0:
-            lick_timestamps.append(current_time)
-            lick_frames_array[current_frame] = 1 # Mark lick at current_frame
-            in_cooldown = cooldown_frames
-            if show_video_with_licks and largest_contour is not None:
-                # Draw bounding box around the largest moving object
-                M = cv2.moments(largest_contour)
-                if M['m00'] != 0:
-                    cx = int(M['m10']/M['m00'])
-                    cy = int(M['m01']/M['m00'])
-                    cv2.circle(current_roi, (cx, cy), 3, (0, 255, 0), -1) # Green circle
-
-        elif in_cooldown > 0:
-            in_cooldown -= 1
-
-        prev_roi_blur = current_roi_blur
-
-        if show_video_with_licks:
-            # Draw ROI rectangle on the full frame
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2) # Blue ROI
-            # Put text for frame number and lick count
-            cv2.putText(frame, f"Frame: {frame_num}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Licks: {len(lick_timestamps)}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-            
-            # Check and display sync pulse information
-            this_state = str(state[current_frame]) # Use current_frame as index
-            this_sync = str(syncpulse[current_frame]) # Use current_frame as index
-            this_trial_type = str(trialtype[current_frame]) # Use current_frame as index
-            if this_trial_type != 'None':
-                cv2.putText(frame, 'TrialType: ' + this_trial_type, (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
-            if this_sync != 'None':
-                cv2.putText(frame, this_sync, (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA) # Yellow text
-            if this_state != 'None':
-                cv2.putText(frame, this_state, (10, 190), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
-            cv2.imshow("Lick Detection Video", frame)
-            if cv2.waitKey(wait_key_delay) & 0xFF == ord('q'): # Press 'q' to quit video playback
-                break
-        # index += 1 # Remove this, as frame_num is used as the index
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-    video_duration_seconds = total_frames / fps if fps > 0 else 0
-   
-    return lick_timestamps, lick_frames_array, video_duration_seconds, fps
-
+# ----------------------------
+# Lick detection with optional GPU (Graphics Processing Unit) acceleration and video saving
+# ----------------------------
 def detect_licks(
     video_path,
     roi,
@@ -283,21 +101,18 @@ def detect_licks(
     save_video_path=None,
     save_codec=None,
     save_fps=None,
+    start_at_frame=None,           # where on-screen playback should start (e.g., middle frame)
+    save_full_video=True,          # if True, still save annotated video from frame 0 → end
+    skip_head_seconds=0.0,         # detection disabled before this time
+    skip_tail_seconds=0.0,         # detection disabled in the last N seconds
 ):
     """
-    Detect mouse licks using frame differencing within an ROI (Region of Interest).
-    Uses PyTorch with CUDA (Compute Unified Device Architecture) on the GPU (Graphics Processing Unit)
+    Detect mouse licks using frame differencing within an ROI. Uses PyTorch with CUDA on the GPU
     if available to accelerate grayscale, blur, absdiff, threshold, dilation, and counting.
-
-    Now supports saving an edited (annotated) video with overlays.
 
     Returns:
         (lick_timestamps, lick_frames_array, video_duration_seconds, fps)
     """
-    import cv2
-    import numpy as np
-    from pathlib import Path
-
     if synced_gpio_file is None:
         print("Error: synced_gpio_file is required.")
         return None, None, 0, 0
@@ -307,7 +122,7 @@ def detect_licks(
         print("Error: ROI has non-positive width/height.")
         return None, None, 0, 0
 
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         print(f"Error: Could not open video file {video_path}")
         return None, None, 0, 0
@@ -319,14 +134,29 @@ def detect_licks(
     frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     wait_key_delay = 1 if fps == 0 else max(1, int(1000 / (fps * playback_speed)))
 
-    # Read first frame
+    # Detection window (skip head/tail for detection only)
+    if fps > 0:
+        det_start = int(max(0, round(skip_head_seconds * fps)))
+        det_end = int(max(0, total_frames - 1 - round(skip_tail_seconds * fps)))
+        if det_end <= det_start:
+            det_start, det_end = 0, max(0, total_frames - 1)
+    else:
+        det_start, det_end = 0, max(0, total_frames - 1)
+
+    # Decide display vs processing start
+    display_start_frame = int(start_at_frame) if start_at_frame is not None else 0
+    display_start_frame = max(0, min(total_frames - 1, display_start_frame))
+    processing_start = 0 if save_full_video else display_start_frame
+
+    # Seek to processing_start before reading first frame
+    cap.set(cv2.CAP_PROP_POS_FRAMES, processing_start)
     ret, prev_frame = cap.read()
     if not ret:
-        print("Error: Could not read the first frame.")
+        print("Error: Could not read the first frame at the requested start.")
         cap.release()
         return None, None, 0, 0
 
-    # Compute detection threshold in pixels from percentage
+    # Threshold in pixels from percentage
     roi_area = w * h
     min_changed_pixels = roi_area * (min_movement_percent / 100.0)
 
@@ -335,11 +165,10 @@ def detect_licks(
     if save_video_path is not None:
         save_path = Path(save_video_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        # Choose codec if not provided
         if save_codec is None:
             ext = save_path.suffix.lower()
             if ext in (".mp4", ".m4v"):
-                fourcc_str = "mp4v"  # widely supported
+                fourcc_str = "mp4v"
             elif ext in (".avi",):
                 fourcc_str = "XVID"
             else:
@@ -371,9 +200,8 @@ def detect_licks(
 
     if use_torch_cuda:
         device = torch.device("cuda")
-        k = 21  # Gaussian kernel size, match your (21,21)
-        # OpenCV sigma approximation when sigma=0
-        sigma = 0.3 * ((k - 1) * 0.5 - 1) + 0.8
+        k = 21  # Gaussian kernel size, matches OpenCV (21,21)
+        sigma = 0.3 * ((k - 1) * 0.5 - 1) + 0.8  # approx OpenCV sigma when sigma=0
 
         def _gaussian_kernel_2d(ksize, sigma, device):
             ax = torch.arange(ksize, device=device, dtype=torch.float32) - (ksize // 2)
@@ -394,7 +222,6 @@ def detect_licks(
         prev_roi = prev_frame[y:y+h, x:x+w]
         prev_t = _to_gray_tensor(prev_roi)
         prev_blur_t = F.conv2d(prev_t, gauss, padding=k // 2)
-
         print("GPU acceleration: ON (PyTorch CUDA)")
     else:
         prev_roi_gray = cv2.cvtColor(prev_frame[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
@@ -404,22 +231,22 @@ def detect_licks(
     lick_timestamps = []
     lick_frames_array = np.zeros(len(synced_gpio_file), dtype=int)
     in_cooldown = 0
-    frame_num = 0
+    frame_num = processing_start  # absolute frame index to keep alignment with synced_gpio_file
 
+    # Main loop
     while True:
+        # Stop conditions
+        if frame_num >= len(synced_gpio_file):
+            break
         ret, frame = cap.read()
         if not ret:
-            break
-        if frame_num >= len(synced_gpio_file):
             break
 
         current_time = (frame_num / fps) if fps > 0 else 0.0
         current_frame_idx = frame_num
         frame_num += 1
 
-        # We'll draw on this if saving or showing
         vis_frame = frame.copy() if overlay_needed else None
-
         roi_frame = frame[y:y+h, x:x+w]
 
         if use_torch_cuda:
@@ -427,10 +254,10 @@ def detect_licks(
             cur_blur_t = F.conv2d(cur_t, gauss, padding=k // 2)
             diff_t = (cur_blur_t - prev_blur_t).abs()
 
-            # Threshold in [0,1] scaled back to 0..255 like OpenCV
+            # Threshold in [0,1] scaled to 0..255 like OpenCV
             mask = (diff_t * 255.0) > threshold
 
-            # Dilation (two iterations)
+            # Dilation (two iterations ~ iterations=2)
             dil1 = F.max_pool2d(mask.float(), kernel_size=3, stride=1, padding=1)
             dil2 = F.max_pool2d(dil1, kernel_size=3, stride=1, padding=1)
 
@@ -438,10 +265,7 @@ def detect_licks(
             movement_detected = changed_pixels > min_changed_pixels
             prev_blur_t = cur_blur_t
 
-            if overlay_needed:
-                dilated_np = (dil2.squeeze().detach().to("cpu").numpy() * 255).astype(np.uint8)
-            else:
-                dilated_np = None
+            dilated_np = (dil2.squeeze().detach().to("cpu").numpy() * 255).astype(np.uint8) if overlay_needed else None
         else:
             roi_gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
             roi_blur = cv2.GaussianBlur(roi_gray, (21, 21), 0)
@@ -452,41 +276,39 @@ def detect_licks(
             movement_detected = changed_pixels > min_changed_pixels
             prev_roi_blur = roi_blur
 
-        # Determine largest contour (for green dot) only if we are drawing
+        # Disable detection outside the desired window
+        detection_enabled = (det_start <= current_frame_idx <= det_end)
+
+        # Centroid for green dot (visual only)
         largest_contour = None
         if overlay_needed and dilated_np is not None:
             contours, _ = cv2.findContours(dilated_np.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if contours:
                 largest_contour = max(contours, key=cv2.contourArea)
 
-        # Lick detection with cooldown
-        drew_dot = False
-        if movement_detected and in_cooldown == 0:
+        # Lick detection with cooldown (only if detection_enabled)
+        if detection_enabled and movement_detected and in_cooldown == 0:
             lick_timestamps.append(current_time)
             lick_frames_array[current_frame_idx] = 1
             in_cooldown = cooldown_frames
 
-            # Draw centroid dot in full-frame coordinates if we have a contour
-            if overlay_needed and largest_contour is not None:
+            if overlay_needed and largest_contour is not None and vis_frame is not None:
                 M = cv2.moments(largest_contour)
                 if M["m00"] != 0:
                     cx = int(M["m10"] / M["m00"])
                     cy = int(M["m01"] / M["m00"])
-                    if vis_frame is not None:
-                        cv2.circle(vis_frame, (x + cx, y + cy), 3, (0, 255, 0), -1)
-                        drew_dot = True
+                    cv2.circle(vis_frame, (x + cx, y + cy), 3, (0, 255, 0), -1)
         elif in_cooldown > 0:
             in_cooldown -= 1
 
-        # Overlays (ROI, counters, trial info)
+        # Overlays (ROI box, counters, per-frame metadata)
         if overlay_needed and vis_frame is not None:
-            cv2.rectangle(vis_frame, (x, y), (x + w, y + h), (255, 0, 0), 2)  # ROI box
-            cv2.putText(vis_frame, f"Frame: {frame_num}", (10, 30),
+            cv2.rectangle(vis_frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            cv2.putText(vis_frame, f"Frame: {current_frame_idx}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
             cv2.putText(vis_frame, f"Licks: {len(lick_timestamps)}", (10, 70),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
-            # Pull per-frame metadata from synced_gpio_file safely
             try:
                 this_state = str(synced_gpio_file['state'].iloc[current_frame_idx])
                 this_sync = str(synced_gpio_file['syncpulse'].iloc[current_frame_idx])
@@ -504,7 +326,8 @@ def detect_licks(
                 cv2.putText(vis_frame, this_state, (10, 190),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2, cv2.LINE_AA)
 
-            if show_video_with_licks:
+            # Show window only after we reach the requested display start
+            if show_video_with_licks and current_frame_idx >= display_start_frame:
                 cv2.imshow("Lick Detection Video", vis_frame)
                 if cv2.waitKey(wait_key_delay) & 0xFF == ord('q'):
                     break
@@ -522,101 +345,9 @@ def detect_licks(
     return lick_timestamps, lick_frames_array, video_duration_seconds, fps
 
 
-
-# def plot_lick_raster(synced_gpio_file):
-#     # no none rows 
-#     synced_gpio_file = synced_gpio_file[synced_gpio_file['trialtype']!='None']
-#     unique_trial_type = np.sort(synced_gpio_file['trialtype'].unique())
-
-#     all_lick_events_per_trial_type = {} # Dictionary to store organized lick events
-
-#     for tt in unique_trial_type:
-#         all_lick_events_per_trial_type[tt] = {}
-#         tt_df = synced_gpio_file[synced_gpio_file['trialtype'] == tt].copy() # .copy() to avoid SettingWithCopyWarning
-#         unique_trial_start_time = tt_df['trialstarttime'].unique()
-        
-#         for trial_idx, t_start in enumerate(unique_trial_start_time):
-#             single_trial_df = tt_df[tt_df['trialstarttime']==t_start]
-#             # Get frame numbers where licks occurred within this trial
-#             lick_frames_in_trial = single_trial_df[single_trial_df['lickframe'] == 1].index.values
-            
-#             if len(lick_frames_in_trial) > 0:
-#                 # Get the first frame number of the trial to use as an offset
-#                 trial_start_frame = single_trial_df.index.min()
-                
-#                 # Calculate lick times relative to the start of the trial
-#                 relative_lick_times = (lick_frames_in_trial - trial_start_frame) / fps
-#                 all_lick_events_per_trial_type[tt][trial_idx] = relative_lick_times.tolist() # Store as list
-
-
-#     # Plot individual lick events for each trial type 
-#     plt.figure(figsize=(20, 8))
-#     all_lick_data = [] # To store (relative_lick_time, plot_y_idx, tt) for eventplot for event individual lick
-#     y_tick_labels = []
-#     y_tick_positions = []
-
-#     color_map = {
-#         0: np.array([41, 114, 112]) / 255,
-#         1: np.array([230, 109, 80]) / 255,
-#         2: np.array([231, 198, 107]) / 255,
-#         3: np.array([138, 176, 124]) / 255,
-#         4: np.array([41, 157, 143]) / 255
-#     }
-    
-
-#     event_positions = []
-#     event_colors    = []
-#     y_tick_labels   = []
-
-#     for tt in unique_trial_type:
-#         trials_dict = all_lick_events_per_trial_type[tt]
-#         color = color_map.get(tt, "black")
-#         for trial_in_type_idx, lick_times in sorted(trials_dict.items()):
-#             if not lick_times:
-#                 continue
-#             event_positions.append(list(lick_times))
-#             event_colors.append(color)
-#             y_tick_labels.append(f"TT{tt} T{trial_in_type_idx + 1}")
-
-#     # Y tick positions are simply 0..N-1 
-#     y_tick_positions = list(range(len(event_positions)))
-#     print(len(y_tick_positions))
-    
-#     # Plot
-#     if event_positions:
-#         plt.eventplot(event_positions, orientation="horizontal", colors=event_colors)
-
-#     # plt.yticks(y_tick_positions, y_tick_labels)
-#     plt.xlabel("Time (s)")
-#     plt.ylabel("Trial Index")
-#     plt.title(f"{mouse_id}_{date}")
-
-#     odor_start_time = 1.5
-#     odor_end_time = 2
-#     ymin = -0.5 # Extend across all trials
-#     ymax = max(y_tick_positions) - 0.5
-#     vline_times = [odor_start_time, odor_end_time, odor_end_time+0.75, odor_end_time+1.5, odor_end_time+3, odor_end_time+6]
-#     for t_vline in vline_times:
-#         plt.vlines(t_vline, ymin, ymax, color='purple', linestyle='-', linewidth=1, alpha=0.7)
-#     plt.axvspan(odor_start_time, odor_end_time, ymin=0, ymax=1, facecolor='purple', alpha=0.1)
-
-#     x_ticks_labels = ['odor', '0.75', '1.5', '3', '6']
-#     x_tick_positions = [odor_start_time, odor_end_time+0.75, odor_end_time+1.5, odor_end_time+3, odor_end_time+6]
-    
-#     plt.xlim([0, 15])
-
-#     plt.xticks(x_tick_positions, x_ticks_labels)
-#     plt.grid(True, axis='x', linestyle='--')
-#     plt.gca().invert_yaxis() # Display trials from top to bottom
-
-#     fig_root_dir = Path(r"\\140.247.90.110\homes2\Carol\LickData")
-#     fig_file_name = f'{mouse_id}_{date}_raster.png'
-#     full_fig_path = fig_root_dir / fig_file_name
-#     full_fig_path.parent.mkdir(parents=True, exist_ok=True)
-#     plt.savefig(full_fig_path)
-#     plt.show()
-
-
+# ----------------------------
+# Raster plotting (no globals; pass fps, mouse_id, date)
+# ----------------------------
 def plot_lick_raster(
     synced_gpio_file,
     fps,
@@ -625,35 +356,17 @@ def plot_lick_raster(
     fig_root_dir=Path(r"\\140.247.90.110\homes2\Carol\LickData")
 ):
     """
-    Plots a raster of lick times per trial type.
-    Expects `synced_gpio_file` to already contain a column 'lickframe' of 0/1 flags
-    (one per video frame), and columns 'trialtype' and 'trialstarttime'.
-
-    Args:
-        synced_gpio_file (pd.DataFrame): frame-aligned metadata with 'lickframe' flags.
-        fps (float): Frames Per Second for converting frames to seconds.
-        mouse_id (str): Mouse identifier (for plot title & filename).
-        date (str): Session date (for plot title & filename).
-        fig_root_dir (Path): Directory to save the figure.
-
-    Returns:
-        Path: full path to the saved figure.
+    Plots a raster of lick times per trial type. Expects synced_gpio_file to contain:
+    'lickframe' (0/1 per frame), 'trialtype', 'trialstarttime'.
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from pathlib import Path
-
     df = synced_gpio_file.copy()
-    # keep rows with valid trialtype
     df = df[df['trialtype'] != 'None']
 
     if 'lickframe' not in df.columns:
         raise ValueError("synced_gpio_file must have a 'lickframe' column (0/1 per frame).")
 
-    # sort trial types in a robust way even if they're strings or ints
     unique_trial_types = sorted(df['trialtype'].unique(), key=lambda v: str(v))
 
-    # build a dict: trialtype -> {trial_idx: [relative lick times...]}
     all_lick_events = {}
     for tt in unique_trial_types:
         tt_df = df[df['trialtype'] == tt].copy()
@@ -667,12 +380,7 @@ def plot_lick_raster(
                 rel_times = (lick_frames_in_trial - trial_start_frame) / float(fps)
                 all_lick_events[str(tt)][trial_idx] = rel_times.tolist()
 
-    # prepare plotting lists
-    event_positions = []
-    event_colors = []
-    y_tick_labels = []
-
-    # color palette (cycled over trial types)
+    event_positions, event_colors, y_labels = [], [], []
     palette = np.array([
         [41, 114, 112],
         [230, 109, 80],
@@ -688,7 +396,7 @@ def plot_lick_raster(
             if lick_times:
                 event_positions.append(list(lick_times))
                 event_colors.append(color)
-                y_tick_labels.append(f"TT{tt} T{trial_in_type_idx + 1}")
+                y_labels.append(f"TT{tt} T{trial_in_type_idx + 1}")
 
     y_positions = list(range(len(event_positions)))
 
@@ -700,7 +408,7 @@ def plot_lick_raster(
     plt.ylabel("Trial Index")
     plt.title(f"{mouse_id}_{date}")
 
-    # same reference timings you used before
+    # Reference timings
     odor_start_time = 1.5
     odor_end_time = 2.0
     ymin = -0.5
@@ -713,7 +421,7 @@ def plot_lick_raster(
         plt.vlines(t_v, ymin, ymax, color='purple', linestyle='-', linewidth=1, alpha=0.7)
     plt.axvspan(odor_start_time, odor_end_time, ymin=0, ymax=1, facecolor='purple', alpha=0.1)
 
-    x_ticks_labels = ['odor', '0.75', '1.5', '3', '6']
+    x_ticks_labels = ['odor', '1.25', '2', '3.5', '6.5']
     x_tick_positions = [odor_start_time,
                         odor_end_time + 0.75,
                         odor_end_time + 1.5,
@@ -733,14 +441,11 @@ def plot_lick_raster(
     return fig_path
 
 
-# if __name__ == "__main__":
-
+# ----------------------------
+# Main
+# ----------------------------
 if __name__ == "__main__":
-    import sys  # for sys.exit
-    from pathlib import Path
-    import pickle
-
-    # protocol = 'OdorWater_VariableDelay_FreeRewards'
+    # protocol = 'OdorWater_VariableDelay_FreeRewards' # [change here]
     protocol = 'CombinedStimOdorTask'
     print('protocol: ' + protocol)
     mouse_id = "CC" + input("MouseID: CC")
@@ -767,7 +472,8 @@ if __name__ == "__main__":
         fps               = temp_data.get('fps')
         synced_gpio_file  = temp_data.get('synced_gpio_file')
         selected_roi      = temp_data.get('selected_roi')
-        lick_frames_array = temp_data.get('lick_frames_array')  # <-- consistent name
+        lick_frames_array = temp_data.get('lick_frames_array')
+        start_frame_for_playback = temp_data.get('start_frame_for_playback', 0)
     else:
         root_bpod_dir  = Path(r"\\140.247.90.110\homes2\Carol\BpodData")
         session_dir    = root_bpod_dir / mouse_id / protocol / "Session Data"
@@ -797,25 +503,25 @@ if __name__ == "__main__":
             bpod_data_path=bpod_data_path
         )
 
-        # ROI (Region of Interest) selection
+        # ROI selection (from the middle) + remember the frame index used
         enter_roi_manually = input("Enter roi manually? (y/n): ").lower()
         if enter_roi_manually == 'y':
             roi_input = input("Enter ROI as (x, y, w, h): ")
             selected_roi = tuple(map(int, roi_input.strip("()").split(",")))
+            start_frame_for_playback = 0
         else:
-            # choose the middle of the *usable* segment for clearer ROI selection
-            selected_roi = select_roi(
+            (selected_roi, start_frame_for_playback) = select_roi(
                 video_path,
                 source_frame="middle",
-                skip_head_seconds=0.0,   # e.g., 10.0 if the first 10 s aren't relevant
-                skip_tail_seconds=0.0,   # e.g., 10.0 if the last 10 s aren't relevant
+                skip_head_seconds=0,  # set to e.g. 10.0 if you know the first 10 s aren't relevant
+                skip_tail_seconds=0,
             )
 
         if not selected_roi:
             print("No ROI selected; exiting.")
             sys.exit(1)
 
-        print(f"Selected ROI: {selected_roi}")
+        print(f"Selected ROI: {selected_roi} (start playback at frame {start_frame_for_playback})")
 
         # Show annotated playback?
         show_video = input("Video playback with lick detection? (y/n): ").lower()
@@ -832,24 +538,29 @@ if __name__ == "__main__":
             except ValueError:
                 print("Invalid input for playback speed. Using default (0.5).")
 
-        # Optional: save the annotated video to disk
+        # Save the annotated video to disk
         out_dir = Path(r"C:\Users\carol\Github\BpodProtocols\lickdetection\out")
         out_dir.mkdir(parents=True, exist_ok=True)
         save_path = out_dir / f"{mouse_id}_{date}_annotated.mp4"
 
-        # Run detection (returns 4-tuple consistently)
+        # Run detection: start displaying from the same frame as ROI selection,
+        # but save the full annotated session to disk.
         lick_timestamps, lick_frames_array, video_duration, fps = detect_licks(
             str(video_path),
             selected_roi,
             show_video_with_licks=show_video_with_licks,
             playback_speed=playback_speed,
             synced_gpio_file=synced_gpio_file,
-            save_video_path=str(save_path),  # comment out if you don't want saving
+            save_video_path= None, # str(save_path), # [change here]
             save_codec="mp4v",
             save_fps=30.0,
+            start_at_frame=start_frame_for_playback,   # start on-screen in the middle
+            save_full_video=True,                      # save entire video annotated
+            skip_head_seconds=0,                     # disable detection before this time (seconds) [change here]
+            skip_tail_seconds=0,                     # disable detection near the end (seconds) [change here]
         )
 
-        # Save temp cache unless you were watching the playback (same behavior as before)
+        # Save temp cache unless you were watching the playback
         if show_video != 'y':
             with open(temp_data_file, 'wb') as f:
                 pickle.dump({
@@ -858,7 +569,8 @@ if __name__ == "__main__":
                     'fps'            : fps,
                     'synced_gpio_file': synced_gpio_file,
                     'selected_roi'   : selected_roi,
-                    'lick_frames_array': lick_frames_array,  # <-- consistent name
+                    'lick_frames_array': lick_frames_array,
+                    'start_frame_for_playback': start_frame_for_playback,
                 }, f)
             print(f"Data saved to {temp_data_file}")
 
@@ -873,97 +585,6 @@ if __name__ == "__main__":
     fig_path = plot_lick_raster(synced_gpio_file, fps, mouse_id, date)
     print(f"Saved raster: {fig_path}")
 
-    # protocol = 'OdorWater_VariableDelay_FreeRewards'
-    protocol = 'CombinedStimOdorTask'
-    print('protocol: ' + protocol)
-    mouse_id = "CC" + input("MouseID: CC")
-    date = "2025" + input("Date (eg. 0917): 2025")
-    ########################################################
-    # Temporary file for saving/loading lick detection data
-    temp_data_folder = Path(r'C:\Users\carol\Github\BpodProtocols\lickdetection\tmpfile')
-    temp_data_folder.mkdir(parents=True, exist_ok=True)
-    temp_data_file = temp_data_folder / f'{mouse_id}_{date}_temp.pkl'
 
-    lick_timestamps = None
-    video_duration = None
-    fps = None
-    lick_frames_array = None
-    selected_roi = None
-    synced_gpio_file = None
 
-    if Path(temp_data_file).exists():
-        print(f"Loading temporary data from {temp_data_file}")
-        with open(temp_data_file, 'rb') as f:
-            temp_data = pickle.load(f)
-            lick_timestamps = temp_data.get('lick_timestamps')
-            video_duration = temp_data.get('video_duration')
-            fps = temp_data.get('fps')
-            synced_gpio_file = temp_data.get('synced_gpio_file')
-            selected_roi = temp_data.get('selected_roi')
-            lick_frames = temp_data.get('lick_frames_array') 
-    else:
-        root_bpod_dir = Path(r"\\140.247.90.110\homes2\Carol\BpodData")
-        session_dir = root_bpod_dir / mouse_id / protocol / "Session Data"
-        pattern = f"{mouse_id}_{protocol}_{date}_*.mat"
-        # latest match
-        matches = list(session_dir.glob(pattern))
-        bpod_data_path = max(matches, key=lambda p: p.stat().st_mtime) if matches else None
-        if bpod_data_path is None:
-            print("No session file found")
-
-        root_video_dir = Path(r"\\140.247.90.110\homes2\Carol\VideoData")
-        video_path = next(Path(root_video_dir).glob(f"{mouse_id}_{date}_*_cam1.avi"))
-        if not video_path:
-             print("No video found")
-
-        gpio_file_path = next(Path(root_video_dir).glob(f"{mouse_id}_{date}_*_gpio1.csv"))
-        
-        synced_gpio_file = sync_data.sync_bpod_video(gpio_file_path=gpio_file_path, bpod_data_path=bpod_data_path)
-
-        enter_roi_manually = input("Enter roi manually? (y/n): ").lower()
-        if enter_roi_manually == 'y':
-            roi_input = input("Enter ROI as (x, y, w, h): ")
-            selected_roi = tuple(map(int, roi_input.strip("()").split(",")))
-
-        else:
-            selected_roi = select_roi(video_path)
-
-        if selected_roi:
-            print(f"Selected ROI: {selected_roi}")
-            
-            show_video = input("Video playback with lick detection? (y/n): ").lower()
-            show_video_with_licks = (show_video == 'y')
-
-            playback_speed = 0.5
-            if show_video_with_licks:
-                try:
-                    speed_input = float(input("Enter playback speed:"))
-                    if speed_input > 0:
-                        playback_speed = speed_input
-                    else:
-                        print("Playback speed must be positive. Using default (0.5).")
-                except ValueError:
-                    print("Invalid input for playback speed. Using default (0.5).")
-
-            # no temp file -> select roi -> detect licks
-            lick_timestamps, lick_frames, video_duration, fps = detect_licks(video_path, selected_roi, 
-                                                                      show_video_with_licks=show_video_with_licks, 
-                                                                      playback_speed=playback_speed, 
-                                                                      synced_gpio_file=synced_gpio_file)
-            # Save data temporarily
-            if show_video != 'y':
-                # will not interupt manually
-                with open(temp_data_file, 'wb') as f:
-                    pickle.dump({
-                        'lick_timestamps': lick_timestamps,
-                        'video_duration': video_duration,
-                        'fps': fps,
-                        'synced_gpio_file': synced_gpio_file,
-                        'selected_roi': selected_roi,
-                        'lick_frames_array': lick_frames # Save as array
-                    }, f)
-                print(f"Data saved to {temp_data_file}")
-
-    #  either temp file exist or detect licks from scratch -> plot lick raster
-    synced_gpio_file['lickframe'] = lick_frames
-    plot_lick_raster(synced_gpio_file)
+# modify [change here]
