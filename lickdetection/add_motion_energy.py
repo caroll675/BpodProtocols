@@ -2,28 +2,32 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 import scipy.io as sio
 
-motion_energy_file = r"C:\video\CamData_combined\CC4_20251104_145442_cam1.mat"
+motion_energy_file = r"C:\video\CamData_combined\CC4_20251010_130903_cam1.mat"
 video_file = r"\\140.247.90.110\homes2\Carol\LickData\annotated_video\CC4_20251010_annotated.mp4"
 motion_energy = sio.loadmat(motion_energy_file)['CamData']['mot_energy'][0,0] # Accessing the correct structure
 labels = {0:'WhiskerPad', 1:'Nose', 2:'Tongue', 3:'Eye'}
-nose_trace = motion_energy[:,1]
+selected_label = 2
+trace = motion_energy[:,selected_label]
+
 
 # Initialize matplotlib figure for the plot
 fig, ax = plt.subplots(figsize=(6, 2), dpi=100)
 line, = ax.plot([], [], color='blue')
-ax.set_xlim(0, len(nose_trace))
-ax.set_ylim(np.min(nose_trace), np.max(nose_trace) * 1.1)
-ax.set_facecolor('black') # Set background to transparent for better contrast
-fig.patch.set_facecolor('black') # Set figure background
+ax.set_xlim(0, len(trace))
+ax.set_ylim(np.min(trace), np.max(trace) * 1.1)
+ax.set_facecolor(None) # Set background to transparent
+fig.patch.set_facecolor(None) # Set figure background to transparent
 ax.tick_params(axis='x', colors='white') # Set tick color to white
 ax.tick_params(axis='y', colors='white') # Set tick color to white
 ax.spines['left'].set_color('white')
 ax.spines['bottom'].set_color('white')
 ax.spines['right'].set_color('white')
 ax.spines['top'].set_color('white')
-ax.set_title('Nose Motion Energy', color='white')
+selected_label_name = labels[selected_label]
+ax.set_title(f'{selected_label_name} Motion Energy', color='white', fontsize=8)
 
 # plot the nose motion energy trace on the video like animation 
 video = cv2.VideoCapture(video_file)
@@ -39,7 +43,7 @@ while True:
     plot_end_idx = frame_num
     
     # Update plot
-    line.set_data(np.arange(plot_start_idx, plot_end_idx), nose_trace[plot_start_idx:plot_end_idx])
+    line.set_data(np.arange(plot_start_idx, plot_end_idx), trace[plot_start_idx:plot_end_idx])
     ax.set_xlim(plot_start_idx, plot_start_idx + window_size) # Set x-lim to the rolling window
     # ax.autoscale_view() # No longer needed with fixed x-lim
     
@@ -53,7 +57,6 @@ while True:
     frame_height, frame_width, _ = frame.shape
     
     # Define position for the plot overlay
-    # For example, top-left corner with some padding
     x_offset = 10
     y_offset = 300
     
@@ -75,3 +78,11 @@ while True:
 video.release()
 cv2.destroyAllWindows()
 
+# save the video with the motion energy trace
+out_dir = Path(r"C:\video\MotionEnergyAnnotated")
+out_dir.mkdir(parents=True, exist_ok=True)
+save_path = out_dir / f"{'CC4'}_{'20251010'}_annotated_motion_energy.mp4"
+writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), 30, (frame_width, frame_height))
+for i in range(frame_num):
+    writer.write(frame)
+writer.release()
