@@ -5,6 +5,10 @@ function CombinedStimOdorTask
     % C. Chen 12/11/2025: Changed delay duration for odor trials and number of free reward trials
     
     % C. Chen 2/8/2026: use red led to optotag so bluestim = red optotag
+
+    % C. Chen 5/22/2026: stablize reward rate, shorten average ITI and increase
+    % chunksize from 33 to 49 (more trials per odor)
+
     global BpodSystem
     
     airON = 0;
@@ -52,12 +56,13 @@ function CombinedStimOdorTask
     S.OdorDelay = 1; % seconds - pre odor period after LED before odor presentation
     S.OdorDuration = 0.5; % seconds
 
-    OdorChunkSize = 33; % trials; chunk size in which to balance trial types
-    S.NumOdorTrials = OdorChunkSize*3; % 99 trials in total, 3 free reward trials, 96 odor trials
+    OdorChunkSize = 49; % trials; chunk size in which to balance trial types
+    S.NumOdorTrials = OdorChunkSize*3; % 147 trials in total, 3 free reward trials, 144 odor trials
     
     S.RewardDelay = [0 1 2.5 5.5]; % one per odor
-    S.FracTrials_Odor = [8/OdorChunkSize 8/OdorChunkSize 8/OdorChunkSize 8/OdorChunkSize]; % fraction trials per odor (changed ChunkSize to 22)
-    S.FracTrials_Free = 1-sum(S.FracTrials_Odor); % fraction free reward trials = 1/33
+    S.FracTrials_Odor = [12/OdorChunkSize 12/OdorChunkSize 12/OdorChunkSize 12/OdorChunkSize];
+    S.FracTrials_Free = 1-sum(S.FracTrials_Odor); % fraction free reward trials = 1/49
+
     assert(S.NumOdors == numel(S.RewardDelay),'RewardDelay must have same number of elements as there are odors'); % assert one reward delay per odor
     S.RewardAmount = 4; % in uL; same for all odors
     
@@ -242,9 +247,9 @@ function CombinedStimOdorTask
     OdorWaterTrialVisualizer('init', state_colors); % only plot available states
     % PokesPlotLicksSlow('init', state_colors, []);
     %% Start Protocol
-    % 
-    % ManualOverride('OB', 2, 1);
+
     %%  Turn on red lamps
+    RedLampOn = 0;
     if S.NumOptotagTrials1 ~= 0
         while ~RedLampOn
             answer = questdlg('Is the Red Lamp ON?', ...
@@ -353,7 +358,7 @@ function CombinedStimOdorTask
             'OutputActions', {'BNC1', 1, 'BNC2',1}); % BNC1 for sync pulse
         for tt = 1:S.NumPatterns
             sma = AddState(sma, 'Name', sprintf('Stim%d',tt),...
-                'Timer', 2,... % Assuming 2 seconds for stim duration, adjust if necessary
+                'Timer', 3,... % Assuming 2 seconds for stim duration, adjust if necessary
                 'StateChangeConditions', {'Tup', 'ITI'},...
                 'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0, 'BNC2',0}); 
         end
@@ -598,7 +603,7 @@ function CombinedStimOdorTask
             'OutputActions', {'BNC1', 1, 'BNC2',1}); 
         for tt = 1:S.NumPatterns
             sma = AddState(sma, 'Name', sprintf('Stim%d',tt),...
-                'Timer', 2,... % Assuming 2 seconds for stim duration, adjust if necessary
+                'Timer', 3,... % Assuming 2 seconds for stim duration, adjust if necessary
                 'StateChangeConditions', {'Tup', 'ITI'},...
                 'OutputActions', {'WavePlayer1', LaserMessage, 'BNC1', 0, 'BNC2',0}); 
         end
